@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>ScreenFast.App</RootNamespace>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenFast.Core\ScreenFast.Core.csproj" />
+    <ProjectReference Include="..\ScreenFast.Capture\ScreenFast.Capture.csproj" />
+    <ProjectReference Include="..\ScreenFast.Audio\ScreenFast.Audio.csproj" />
+    <ProjectReference Include="..\ScreenFast.Encoding\ScreenFast.Encoding.csproj" />
+    <ProjectReference Include="..\ScreenFast.Infrastructure\ScreenFast.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+  </ItemGroup>
+</Project>
