@@ -1,4 +1,4 @@
-﻿<Window
+<Window
     x:Class="ScreenFast.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -8,6 +8,7 @@
 
     <Grid Padding="24" RowSpacing="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -74,6 +75,10 @@
                 Content="Record" />
             <Button
                 MinWidth="120"
+                Command="{x:Bind ViewModel.PauseResumeCommand}"
+                Content="{x:Bind ViewModel.PauseResumeText, Mode=OneWay}" />
+            <Button
+                MinWidth="120"
                 Command="{x:Bind ViewModel.StopCommand}"
                 Content="Stop" />
         </StackPanel>
@@ -90,6 +95,18 @@
 
         <Border
             Grid.Row="6"
+            Padding="12"
+            Background="{ThemeResource AccentFillColorSecondaryBrush}"
+            CornerRadius="8">
+            <StackPanel Spacing="4">
+                <TextBlock FontWeight="SemiBold" Text="Tray and Hotkeys" />
+                <TextBlock Opacity="0.84" Text="Start: Ctrl+Shift+F9  |  Stop: Ctrl+Shift+F10  |  Pause/Resume: Ctrl+Shift+F11" TextWrapping="WrapWholeWords" />
+                <TextBlock Opacity="0.84" Text="{x:Bind ViewModel.ShellMessageText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            Grid.Row="7"
             Padding="16"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             CornerRadius="8">

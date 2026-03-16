@@ -1,4 +1,6 @@
-﻿using System.Globalization;
+
+using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
@@ -26,6 +28,9 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     private AppError? _backgroundFailure;
     private int _runtimeFaulted;
     private bool _isRecording;
+    private bool _isPaused;
+    private long? _pauseStartedTimestamp;
+    private long _totalPausedDurationHundredsOfNanoseconds;
 
     public MediaFoundationRecordingEncoderService(
         ICaptureSessionFactory captureSessionFactory,
@@ -54,6 +59,9 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
         _backgroundFailure = null;
         _runtimeFaulted = 0;
+        _isPaused = false;
+        _pauseStartedTimestamp = null;
+        _totalPausedDurationHundredsOfNanoseconds = 0;
 
         var captureSessionResult = await _captureSessionFactory.CreateAsync(request.Source, ProcessVideoFrame, HandleRuntimeFailure, cancellationToken);
         if (!captureSessionResult.IsSuccess || captureSessionResult.Value is null)
@@ -141,6 +149,96 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         }
     }
 
+    public Task<OperationResult> PauseAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_isRecording || _writer is null)
+        {
+            return Task.FromResult(OperationResult.Failure(AppError.InvalidState("There is no active recording to pause.")));
+        }
+
+        if (_isPaused)
+        {
+            return Task.FromResult(OperationResult.Failure(AppError.InvalidState("Recording is already paused.")));
+        }
+
+        var captureResult = _captureSession?.Pause() ?? OperationResult.Success();
+        if (!captureResult.IsSuccess)
+        {
+            return Task.FromResult(captureResult);
+        }
+
+        var systemAudioResult = _systemAudioSession?.Pause() ?? OperationResult.Success();
+        if (!systemAudioResult.IsSuccess)
+        {
+            return Task.FromResult(systemAudioResult);
+        }
+
+        var microphoneResult = _microphoneSession?.Pause() ?? OperationResult.Success();
+        if (!microphoneResult.IsSuccess)
+        {
+            return Task.FromResult(microphoneResult);
+        }
+
+        lock (_sync)
+        {
+            _pauseStartedTimestamp = Stopwatch.GetTimestamp();
+            _isPaused = true;
+            _audioMixer?.Pause();
+        }
+
+        return Task.FromResult(OperationResult.Success());
+    }
+
+    public Task<OperationResult> ResumeAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_isRecording || _writer is null)
+        {
+            return Task.FromResult(OperationResult.Failure(AppError.InvalidState("There is no paused recording to resume.")));
+        }
+
+        if (!_isPaused)
+        {
+            return Task.FromResult(OperationResult.Failure(AppError.InvalidState("Recording is not paused.")));
+        }
+
+        var captureResult = _captureSession?.Resume() ?? OperationResult.Success();
+        if (!captureResult.IsSuccess)
+        {
+            return Task.FromResult(captureResult);
+        }
+
+        var systemAudioResult = _systemAudioSession?.Resume() ?? OperationResult.Success();
+        if (!systemAudioResult.IsSuccess)
+        {
+            return Task.FromResult(systemAudioResult);
+        }
+
+        var microphoneResult = _microphoneSession?.Resume() ?? OperationResult.Success();
+        if (!microphoneResult.IsSuccess)
+        {
+            return Task.FromResult(microphoneResult);
+        }
+
+        lock (_sync)
+        {
+            if (_pauseStartedTimestamp.HasValue)
+            {
+                var pausedTicks = Stopwatch.GetTimestamp() - _pauseStartedTimestamp.Value;
+                _totalPausedDurationHundredsOfNanoseconds += ConvertStopwatchTicksToHundredsOfNanoseconds(pausedTicks);
+            }
+
+            _pauseStartedTimestamp = null;
+            _isPaused = false;
+            _audioMixer?.Resume();
+        }
+
+        return Task.FromResult(OperationResult.Success());
+    }
+
     public async Task<OperationResult<string>> StopAsync(CancellationToken cancellationToken = default)
     {
         if ((!_isRecording && _backgroundFailure is null) || _writer is null || string.IsNullOrWhiteSpace(_outputPath))
@@ -162,7 +260,10 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         finally
         {
             _isRecording = false;
+            _isPaused = false;
             _outputPath = null;
+            _pauseStartedTimestamp = null;
+            _totalPausedDurationHundredsOfNanoseconds = 0;
         }
     }
 
@@ -181,9 +282,14 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 return OperationResult.Failure(AppError.RecordingFailed("The video writer is not available."));
             }
 
+            if (_isPaused)
+            {
+                return OperationResult.Success();
+            }
+
             try
             {
-                _writer.WriteVideoFrame(frame.TexturePointer, frame.TimestampHundredsOfNanoseconds);
+                _writer.WriteVideoFrame(frame.TexturePointer, AdjustVideoTimestamp(frame.TimestampHundredsOfNanoseconds));
                 return OperationResult.Success();
             }
             catch (Exception ex)
@@ -199,12 +305,28 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     {
         try
         {
+            if (_isPaused)
+            {
+                return;
+            }
+
             _audioMixer?.AddChunk(chunk);
         }
         catch (Exception ex)
         {
             HandleRuntimeFailure(AppError.AudioCaptureFailed($"ScreenFast could not process audio: {ex.Message}"));
         }
+    }
+
+    private long AdjustVideoTimestamp(long sourceTimestampHundredsOfNanoseconds)
+    {
+        var pausedDuration = _totalPausedDurationHundredsOfNanoseconds;
+        if (_pauseStartedTimestamp.HasValue)
+        {
+            pausedDuration += ConvertStopwatchTicksToHundredsOfNanoseconds(Stopwatch.GetTimestamp() - _pauseStartedTimestamp.Value);
+        }
+
+        return Math.Max(0, sourceTimestampHundredsOfNanoseconds - pausedDuration);
     }
 
     private void HandleRuntimeFailure(AppError error)
@@ -272,12 +394,20 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         }
 
         _isRecording = false;
+        _isPaused = false;
+        _pauseStartedTimestamp = null;
+        _totalPausedDurationHundredsOfNanoseconds = 0;
     }
 
     private static string BuildOutputPath(string outputFolder)
     {
         var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         return Path.Combine(outputFolder, $"ScreenFast-{timestamp}.mp4");
+    }
+
+    private static long ConvertStopwatchTicksToHundredsOfNanoseconds(long stopwatchTicks)
+    {
+        return (long)(stopwatchTicks * 10_000_000d / Stopwatch.Frequency);
     }
 
     private sealed class MediaFoundationLifetime : IDisposable
@@ -325,6 +455,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         private Task? _pumpTask;
         private MediaFoundationMp4Writer? _writer;
         private Action<AppError>? _runtimeErrorHandler;
+        private bool _isPaused;
 
         public AudioMixerPump()
         {
@@ -347,9 +478,21 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             _pumpTask = Task.Run(() => PumpAsync(_cancellationTokenSource.Token), _cancellationTokenSource.Token);
         }
 
+        public void Pause()
+        {
+            _isPaused = true;
+            ClearBuffers();
+        }
+
+        public void Resume()
+        {
+            ClearBuffers();
+            _isPaused = false;
+        }
+
         public void AddChunk(AudioChunk chunk)
         {
-            if (chunk.BytesRecorded <= 0)
+            if (chunk.BytesRecorded <= 0 || _isPaused)
             {
                 return;
             }
@@ -386,8 +529,13 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(20));
                 while (await timer.WaitForNextTickAsync(cancellationToken))
                 {
+                    if (_isPaused || _writer is null)
+                    {
+                        continue;
+                    }
+
                     var samplesRead = _mixingProvider.Read(mixedSamples, 0, mixedSamples.Length);
-                    if (samplesRead <= 0 || _writer is null)
+                    if (samplesRead <= 0)
                     {
                         continue;
                     }
@@ -405,6 +553,12 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             {
                 _runtimeErrorHandler?.Invoke(AppError.AudioCaptureFailed($"ScreenFast could not mix audio while recording: {ex.Message}"));
             }
+        }
+
+        private void ClearBuffers()
+        {
+            _systemAudioBuffer.ClearBuffer();
+            _microphoneBuffer.ClearBuffer();
         }
 
         private static BufferedWaveProvider CreateBuffer()

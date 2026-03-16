@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Dispatching;
+using Microsoft.UI.Dispatching;
 using ScreenFast.App.Commands;
 using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
@@ -13,6 +13,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private RecorderStatusSnapshot _snapshot;
     private bool _includeSystemAudio;
     private bool _includeMicrophone;
+    private string? _shellMessage;
 
     public MainWindowViewModel(IRecorderOrchestrator orchestrator)
     {
@@ -25,6 +26,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectSourceCommand = new AsyncRelayCommand(() => _orchestrator.SelectSourceAsync(), () => CanSelectSource);
         PickOutputFolderCommand = new AsyncRelayCommand(() => _orchestrator.ChooseOutputFolderAsync(), () => CanPickOutputFolder);
         RecordCommand = new AsyncRelayCommand(() => _orchestrator.StartRecordingAsync(), () => CanRecord);
+        PauseResumeCommand = new AsyncRelayCommand(() => _orchestrator.TogglePauseResumeAsync(), () => CanPauseResume);
         StopCommand = new AsyncRelayCommand(() => _orchestrator.StopRecordingAsync(), () => CanStop);
 
         _orchestrator.SnapshotChanged += OnSnapshotChanged;
@@ -36,6 +38,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncRelayCommand RecordCommand { get; }
 
+    public AsyncRelayCommand PauseResumeCommand { get; }
+
     public AsyncRelayCommand StopCommand { get; }
 
     public string StatusText => _snapshot.StatusMessage;
@@ -43,6 +47,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public string TimerText => _snapshot.TimerText;
 
     public string StateText => _snapshot.State.ToString();
+
+    public string PauseResumeText => _snapshot.State == RecorderState.Paused ? "Resume" : "Pause";
 
     public string SourceSummary => _snapshot.SelectedSource is null
         ? "No source selected"
@@ -59,6 +65,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public string OutputFolderText => string.IsNullOrWhiteSpace(_snapshot.OutputFolder)
         ? "Output folder not selected"
         : _snapshot.OutputFolder;
+
+    public string ShellMessageText => _shellMessage ?? string.Empty;
+
+    public bool HasShellMessage => !string.IsNullOrWhiteSpace(_shellMessage);
 
     public bool IncludeSystemAudio
     {
@@ -90,11 +100,24 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool CanRecord => _snapshot.State == RecorderState.Ready && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
 
-    public bool CanStop => _snapshot.State == RecorderState.Recording;
+    public bool CanPauseResume => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
+
+    public bool CanStop => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
 
     public void InitializeWindowHandle(nint windowHandle)
     {
         _orchestrator.SetWindowHandle(windowHandle);
+    }
+
+    public void SetShellMessage(string? message)
+    {
+        if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(() => ApplyShellMessage(message));
+            return;
+        }
+
+        ApplyShellMessage(message);
     }
 
     private void OnSnapshotChanged(object? sender, RecorderStatusSnapshot snapshot)
@@ -117,6 +140,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RaisePropertyChanged(nameof(StatusText));
         RaisePropertyChanged(nameof(TimerText));
         RaisePropertyChanged(nameof(StateText));
+        RaisePropertyChanged(nameof(PauseResumeText));
         RaisePropertyChanged(nameof(SourceSummary));
         RaisePropertyChanged(nameof(SourceDetails));
         RaisePropertyChanged(nameof(SourceIdText));
@@ -126,8 +150,16 @@ public sealed class MainWindowViewModel : ObservableObject
         RaisePropertyChanged(nameof(CanSelectSource));
         RaisePropertyChanged(nameof(CanPickOutputFolder));
         RaisePropertyChanged(nameof(CanRecord));
+        RaisePropertyChanged(nameof(CanPauseResume));
         RaisePropertyChanged(nameof(CanStop));
         RefreshCommands();
+    }
+
+    private void ApplyShellMessage(string? message)
+    {
+        _shellMessage = message;
+        RaisePropertyChanged(nameof(ShellMessageText));
+        RaisePropertyChanged(nameof(HasShellMessage));
     }
 
     private void RefreshCommands()
@@ -135,6 +167,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectSourceCommand.NotifyCanExecuteChanged();
         PickOutputFolderCommand.NotifyCanExecuteChanged();
         RecordCommand.NotifyCanExecuteChanged();
+        PauseResumeCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
     }
 }

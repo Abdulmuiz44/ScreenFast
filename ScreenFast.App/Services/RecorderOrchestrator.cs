@@ -1,4 +1,4 @@
-﻿using ScreenFast.Core.Interfaces;
+using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
 using ScreenFast.Core.Results;
 using ScreenFast.Core.State;
@@ -15,6 +15,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
     private nint _windowHandle;
     private CancellationTokenSource? _timerCancellationSource;
     private DateTimeOffset _recordingStartedAt;
+    private TimeSpan _elapsedBeforePause;
 
     public RecorderOrchestrator(
         ICaptureSourcePickerService captureSourcePickerService,
@@ -139,9 +140,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
 
     public async Task StartRecordingAsync(CancellationToken cancellationToken = default)
     {
-        if (Snapshot.State == RecorderState.Recording)
+        if (Snapshot.State is RecorderState.Recording or RecorderState.Paused)
         {
-            Publish(Snapshot with { StatusMessage = "Recording is already in progress." });
+            Publish(Snapshot with { StatusMessage = "A recording session is already active." });
             return;
         }
 
@@ -181,8 +182,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
 
         if (result.IsSuccess && result.Value is not null)
         {
+            _elapsedBeforePause = TimeSpan.Zero;
             _recordingStartedAt = DateTimeOffset.UtcNow;
-            StartTimer();
+            StartTimerLoop();
             var audioSummary = BuildAudioSummary(result.Value);
             var status = string.IsNullOrWhiteSpace(result.Value.WarningMessage)
                 ? $"Recording to {Path.GetFileName(result.Value.FilePath)}{audioSummary}"
@@ -191,7 +193,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             Publish(Snapshot with
             {
                 State = RecorderState.Recording,
-                StatusMessage = status
+                StatusMessage = status,
+                TimerText = FormatElapsed(GetElapsed())
             });
             return;
         }
@@ -205,9 +208,105 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         });
     }
 
+    public async Task PauseRecordingAsync(CancellationToken cancellationToken = default)
+    {
+        if (Snapshot.State == RecorderState.Paused)
+        {
+            Publish(Snapshot with { StatusMessage = "Recording is already paused." });
+            return;
+        }
+
+        if (Snapshot.State != RecorderState.Recording)
+        {
+            Publish(Snapshot with { StatusMessage = "Recording must be running before it can be paused." });
+            return;
+        }
+
+        var transition = _stateMachine.TransitionTo(RecorderState.Paused);
+        if (!transition.IsSuccess)
+        {
+            PublishError(transition.Error!);
+            return;
+        }
+
+        var pauseResult = await _recordingEncoderService.PauseAsync(cancellationToken);
+        if (!pauseResult.IsSuccess)
+        {
+            _stateMachine.TransitionTo(RecorderState.Recording);
+            Publish(Snapshot with
+            {
+                State = RecorderState.Recording,
+                StatusMessage = pauseResult.Error?.Message ?? "ScreenFast could not pause the recording."
+            });
+            return;
+        }
+
+        _elapsedBeforePause = GetElapsed();
+        StopTimerLoop(resetDisplay: false);
+        Publish(Snapshot with
+        {
+            State = RecorderState.Paused,
+            StatusMessage = "Recording paused.",
+            TimerText = FormatElapsed(_elapsedBeforePause)
+        });
+    }
+
+    public async Task ResumeRecordingAsync(CancellationToken cancellationToken = default)
+    {
+        if (Snapshot.State == RecorderState.Recording)
+        {
+            Publish(Snapshot with { StatusMessage = "Recording is already running." });
+            return;
+        }
+
+        if (Snapshot.State != RecorderState.Paused)
+        {
+            Publish(Snapshot with { StatusMessage = "Recording must be paused before it can resume." });
+            return;
+        }
+
+        var transition = _stateMachine.TransitionTo(RecorderState.Recording);
+        if (!transition.IsSuccess)
+        {
+            PublishError(transition.Error!);
+            return;
+        }
+
+        var resumeResult = await _recordingEncoderService.ResumeAsync(cancellationToken);
+        if (!resumeResult.IsSuccess)
+        {
+            _stateMachine.TransitionTo(RecorderState.Paused);
+            Publish(Snapshot with
+            {
+                State = RecorderState.Paused,
+                StatusMessage = resumeResult.Error?.Message ?? "ScreenFast could not resume the recording."
+            });
+            return;
+        }
+
+        _recordingStartedAt = DateTimeOffset.UtcNow;
+        StartTimerLoop();
+        Publish(Snapshot with
+        {
+            State = RecorderState.Recording,
+            StatusMessage = "Recording resumed.",
+            TimerText = FormatElapsed(GetElapsed())
+        });
+    }
+
+    public Task TogglePauseResumeAsync(CancellationToken cancellationToken = default)
+    {
+        return Snapshot.State switch
+        {
+            RecorderState.Recording => PauseRecordingAsync(cancellationToken),
+            RecorderState.Paused => ResumeRecordingAsync(cancellationToken),
+            _ => HandleInvalidPauseToggleAsync()
+        };
+    }
+
     public async Task StopRecordingAsync(CancellationToken cancellationToken = default)
     {
-        if (Snapshot.State != RecorderState.Recording)
+        if (Snapshot.State is not RecorderState.Recording and not RecorderState.Paused)
         {
             Publish(Snapshot with { StatusMessage = "There is no active recording to stop." });
             return;
@@ -220,6 +319,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             return;
         }
 
+        StopTimerLoop(resetDisplay: false);
         Publish(Snapshot with
         {
             State = RecorderState.Stopping,
@@ -253,6 +353,18 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         });
     }
 
+    private Task HandleInvalidPauseToggleAsync()
+    {
+        Publish(Snapshot with
+        {
+            StatusMessage = Snapshot.State == RecorderState.Ready
+                ? "Start recording before using pause or resume."
+                : "Pause and resume are only available while recording."
+        });
+
+        return Task.CompletedTask;
+    }
+
     private void OnRecordingRuntimeErrorOccurred(object? sender, AppError error)
     {
         ResetTimer();
@@ -265,9 +377,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         });
     }
 
-    private void StartTimer()
+    private void StartTimerLoop()
     {
-        ResetTimer();
+        StopTimerLoop(resetDisplay: false);
         _timerCancellationSource = new CancellationTokenSource();
         _ = RunTimerLoopAsync(_timerCancellationSource.Token);
     }
@@ -279,8 +391,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                var elapsed = DateTimeOffset.UtcNow - _recordingStartedAt;
-                Publish(Snapshot with { TimerText = elapsed.ToString(@"hh\:mm\:ss") });
+                Publish(Snapshot with { TimerText = FormatElapsed(GetElapsed()) });
             }
         }
         catch (OperationCanceledException)
@@ -288,7 +399,14 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         }
     }
 
-    private void ResetTimer()
+    private TimeSpan GetElapsed()
+    {
+        return Snapshot.State == RecorderState.Recording
+            ? _elapsedBeforePause + (DateTimeOffset.UtcNow - _recordingStartedAt)
+            : _elapsedBeforePause;
+    }
+
+    private void StopTimerLoop(bool resetDisplay)
     {
         if (_timerCancellationSource is not null)
         {
@@ -297,6 +415,16 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             _timerCancellationSource = null;
         }
 
+        if (resetDisplay)
+        {
+            Publish(Snapshot with { TimerText = "00:00:00" });
+        }
+    }
+
+    private void ResetTimer()
+    {
+        StopTimerLoop(resetDisplay: false);
+        _elapsedBeforePause = TimeSpan.Zero;
         Publish(Snapshot with { TimerText = "00:00:00" });
     }
 
@@ -315,6 +443,11 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
     {
         Snapshot = snapshot;
         SnapshotChanged?.Invoke(this, snapshot);
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        return elapsed.ToString(@"hh\:mm\:ss");
     }
 
     private static string BuildAudioSummary(RecordingSessionInfo sessionInfo)

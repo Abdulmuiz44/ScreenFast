@@ -1,4 +1,4 @@
-﻿using ScreenFast.Capture.Interop;
+using ScreenFast.Capture.Interop;
 using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
 using ScreenFast.Core.Results;
@@ -55,6 +55,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
         private SizeInt32 _initialSize;
         private bool _isStarted;
         private bool _isStopping;
+        private bool _isPaused;
         private int _faulted;
 
         public CaptureSessionInstance(
@@ -95,6 +96,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                 _captureSession = _framePool.CreateCaptureSession(_captureItem);
                 _captureSession.StartCapture();
                 _isStarted = true;
+                _isPaused = false;
                 return OperationResult.Success();
             }
             catch (Exception ex)
@@ -102,6 +104,28 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                 DisposeCore();
                 return OperationResult.Failure(AppError.RecordingFailed($"ScreenFast could not start capture: {ex.Message}"));
             }
+        }
+
+        public OperationResult Pause()
+        {
+            if (!_isStarted || _isStopping)
+            {
+                return OperationResult.Failure(AppError.InvalidState("Capture is not active."));
+            }
+
+            _isPaused = true;
+            return OperationResult.Success();
+        }
+
+        public OperationResult Resume()
+        {
+            if (!_isStarted || _isStopping)
+            {
+                return OperationResult.Failure(AppError.InvalidState("Capture is not active."));
+            }
+
+            _isPaused = false;
+            return OperationResult.Success();
         }
 
         public Task<OperationResult> StopAsync(CancellationToken cancellationToken = default)
@@ -136,6 +160,11 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                 if (frame.ContentSize.Width != _initialSize.Width || frame.ContentSize.Height != _initialSize.Height)
                 {
                     ReportRuntimeError(AppError.SourceSizeChanged());
+                    return;
+                }
+
+                if (_isPaused)
+                {
                     return;
                 }
 
@@ -193,6 +222,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             _captureSession?.Dispose();
             _captureSession = null;
             _isStarted = false;
+            _isPaused = false;
         }
     }
 }

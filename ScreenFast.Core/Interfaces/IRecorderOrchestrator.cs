@@ -1,4 +1,4 @@
-﻿using ScreenFast.Core.Models;
+using ScreenFast.Core.Models;
 
 namespace ScreenFast.Core.Interfaces;
 
@@ -17,6 +17,12 @@ public interface IRecorderOrchestrator
     Task ChooseOutputFolderAsync(CancellationToken cancellationToken = default);
 
     Task StartRecordingAsync(CancellationToken cancellationToken = default);
+
+    Task PauseRecordingAsync(CancellationToken cancellationToken = default);
+
+    Task ResumeRecordingAsync(CancellationToken cancellationToken = default);
+
+    Task TogglePauseResumeAsync(CancellationToken cancellationToken = default);
 
     Task StopRecordingAsync(CancellationToken cancellationToken = default);
 }

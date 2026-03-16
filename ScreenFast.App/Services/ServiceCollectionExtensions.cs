@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using ScreenFast.App.ViewModels;
 using ScreenFast.Audio.Services;
 using ScreenFast.Capture.Services;
@@ -22,6 +22,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISystemAudioCaptureService, WasapiLoopbackCaptureService>();
         services.AddSingleton<IMicrophoneCaptureService, MicrophoneCaptureService>();
         services.AddSingleton<IRecorderOrchestrator, RecorderOrchestrator>();
+        services.AddSingleton<IDesktopShellService, DesktopShellService>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<MainWindow>();
 

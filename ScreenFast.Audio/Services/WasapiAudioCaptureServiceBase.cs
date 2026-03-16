@@ -1,4 +1,4 @@
-﻿using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using ScreenFast.Audio.Internal;
 using ScreenFast.Core.Interfaces;
@@ -57,6 +57,7 @@ internal abstract class WasapiAudioCaptureServiceBase
         private long _sampleFramesEmitted;
         private bool _isStopped;
         private bool _hasFaulted;
+        private bool _isPaused;
 
         public WasapiAudioCaptureSession(
             AudioInputKind kind,
@@ -94,6 +95,30 @@ internal abstract class WasapiAudioCaptureServiceBase
             {
                 return Task.FromResult(OperationResult.Failure(AudioErrorFactory.DeviceUnavailable(_kind, ex.Message)));
             }
+        }
+
+        public OperationResult Pause()
+        {
+            if (_isStopped)
+            {
+                return OperationResult.Failure(AppError.InvalidState("Audio capture is not active."));
+            }
+
+            _isPaused = true;
+            _bufferedProvider.ClearBuffer();
+            return OperationResult.Success();
+        }
+
+        public OperationResult Resume()
+        {
+            if (_isStopped)
+            {
+                return OperationResult.Failure(AppError.InvalidState("Audio capture is not active."));
+            }
+
+            _bufferedProvider.ClearBuffer();
+            _isPaused = false;
+            return OperationResult.Success();
         }
 
         public async Task<OperationResult> StopAsync(CancellationToken cancellationToken = default)
@@ -151,6 +176,11 @@ internal abstract class WasapiAudioCaptureServiceBase
             {
                 var samplesRead = _sampleProvider.Read(floatSamples, 0, floatSamples.Length);
                 if (samplesRead <= 0)
+                {
+                    continue;
+                }
+
+                if (_isPaused)
                 {
                     continue;
                 }
