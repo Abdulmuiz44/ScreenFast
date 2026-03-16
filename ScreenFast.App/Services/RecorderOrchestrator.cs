@@ -38,6 +38,26 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         _windowHandle = windowHandle;
     }
 
+    public void ApplyPersistedSettings(AppSettings settings, CaptureSourceModel? restoredSource, string? startupMessage)
+    {
+        var nextState = restoredSource is not null ? RecorderState.Ready : RecorderState.Idle;
+        _stateMachine.TransitionTo(nextState);
+        Publish(Snapshot with
+        {
+            State = nextState,
+            SelectedSource = restoredSource,
+            OutputFolder = settings.OutputFolder,
+            IncludeSystemAudio = settings.IncludeSystemAudio,
+            IncludeMicrophone = settings.IncludeMicrophone,
+            QualityPreset = settings.QualityPreset,
+            StatusMessage = string.IsNullOrWhiteSpace(startupMessage)
+                ? nextState == RecorderState.Ready
+                    ? "Ready to record."
+                    : "Choose a display or window to get ready."
+                : startupMessage
+        });
+    }
+
     public void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone)
     {
         Publish(Snapshot with
@@ -45,6 +65,11 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             IncludeSystemAudio = includeSystemAudio,
             IncludeMicrophone = includeMicrophone
         });
+    }
+
+    public void UpdateQualityPreset(VideoQualityPreset preset)
+    {
+        Publish(Snapshot with { QualityPreset = preset });
     }
 
     public async Task SelectSourceAsync(CancellationToken cancellationToken = default)
@@ -177,7 +202,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
                 Snapshot.SelectedSource,
                 Snapshot.OutputFolder,
                 Snapshot.IncludeSystemAudio,
-                Snapshot.IncludeMicrophone),
+                Snapshot.IncludeMicrophone,
+                Snapshot.QualityPreset),
             cancellationToken);
 
         if (result.IsSuccess && result.Value is not null)
@@ -187,8 +213,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             StartTimerLoop();
             var audioSummary = BuildAudioSummary(result.Value);
             var status = string.IsNullOrWhiteSpace(result.Value.WarningMessage)
-                ? $"Recording to {Path.GetFileName(result.Value.FilePath)}{audioSummary}"
-                : $"Recording to {Path.GetFileName(result.Value.FilePath)}{audioSummary}. {result.Value.WarningMessage}";
+                ? $"Recording to {Path.GetFileName(result.Value.FilePath)} using {result.Value.QualityPreset}{audioSummary}"
+                : $"Recording to {Path.GetFileName(result.Value.FilePath)} using {result.Value.QualityPreset}{audioSummary}. {result.Value.WarningMessage}";
 
             Publish(Snapshot with
             {

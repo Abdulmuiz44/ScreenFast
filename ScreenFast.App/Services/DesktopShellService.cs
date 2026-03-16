@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using ScreenFast.App.Interop;
 using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
+using ScreenFast.Core.Results;
 using ScreenFast.Core.State;
 using Forms = System.Windows.Forms;
 
@@ -12,14 +13,12 @@ namespace ScreenFast.App.Services;
 
 public sealed class DesktopShellService : IDesktopShellService
 {
-    private static readonly HotkeyDefinition[] Hotkeys =
-    [
-        new(1, "Start recording", "Ctrl+Shift+F9", NativeMethods.ModControl | NativeMethods.ModShift, 0x78),
-        new(2, "Stop recording", "Ctrl+Shift+F10", NativeMethods.ModControl | NativeMethods.ModShift, 0x79),
-        new(3, "Pause or resume", "Ctrl+Shift+F11", NativeMethods.ModControl | NativeMethods.ModShift, 0x7A)
-    ];
+    private const int StartHotkeyId = 1;
+    private const int StopHotkeyId = 2;
+    private const int PauseResumeHotkeyId = 3;
 
     private readonly IRecorderOrchestrator _orchestrator;
+    private readonly IAppPreferencesService _preferencesService;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Forms.ContextMenuStrip _menu;
     private readonly Forms.ToolStripMenuItem _startMenuItem;
@@ -37,11 +36,14 @@ public sealed class DesktopShellService : IDesktopShellService
     private bool _isExitInProgress;
     private bool _isDisposed;
     private RecorderStatusSnapshot _snapshot;
+    private HotkeySettings _activeHotkeys;
 
-    public DesktopShellService(IRecorderOrchestrator orchestrator)
+    public DesktopShellService(IRecorderOrchestrator orchestrator, IAppPreferencesService preferencesService)
     {
         _orchestrator = orchestrator;
+        _preferencesService = preferencesService;
         _snapshot = orchestrator.Snapshot;
+        _activeHotkeys = preferencesService.CurrentSettings.Hotkeys;
         _orchestrator.SnapshotChanged += OnSnapshotChanged;
 
         _menu = new Forms.ContextMenuStrip();
@@ -82,13 +84,48 @@ public sealed class DesktopShellService : IDesktopShellService
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _windowHandle = windowHandle;
         _windowProcedure = WindowProcedure;
+        _previousWindowProcedure = NativeMethods.GetWindowLongPtr(windowHandle, NativeMethods.GwlpWndProc);
         var functionPointer = Marshal.GetFunctionPointerForDelegate(_windowProcedure);
-        _previousWindowProcedure = NativeMethods.SetWindowLongPtr(windowHandle, NativeMethods.GwlpWndProc, functionPointer);
+        NativeMethods.SetWindowLongPtr(windowHandle, NativeMethods.GwlpWndProc, functionPointer);
         _notifyIcon.Visible = true;
         _isInitialized = true;
 
-        RegisterHotkeys();
+        var registrationResult = RegisterHotkeys(_activeHotkeys, _activeHotkeys);
+        if (!registrationResult.IsSuccess)
+        {
+            MessageChanged?.Invoke(this, registrationResult.Error?.Message);
+        }
+
         ApplySnapshot(_snapshot);
+    }
+
+    public void ApplyStartupBehavior()
+    {
+        if (_preferencesService.CurrentSettings.LaunchMinimizedToTray)
+        {
+            HideWindow("ScreenFast started in the tray.");
+        }
+    }
+
+    public async Task<OperationResult> UpdateHotkeysAsync(HotkeySettings hotkeys, CancellationToken cancellationToken = default)
+    {
+        var validation = ValidateHotkeys(hotkeys);
+        if (!validation.IsSuccess)
+        {
+            return validation;
+        }
+
+        if (_isInitialized)
+        {
+            var registration = RegisterHotkeys(hotkeys, _activeHotkeys);
+            if (!registration.IsSuccess)
+            {
+                return registration;
+            }
+        }
+
+        _activeHotkeys = hotkeys;
+        return await _preferencesService.UpdateHotkeySettingsAsync(hotkeys, cancellationToken);
     }
 
     public void Dispose()
@@ -99,19 +136,11 @@ public sealed class DesktopShellService : IDesktopShellService
         }
 
         _isDisposed = true;
+        UnregisterHotkeys();
 
-        if (_windowHandle != nint.Zero)
+        if (_windowHandle != nint.Zero && _previousWindowProcedure != nint.Zero)
         {
-            foreach (var hotkey in Hotkeys)
-            {
-                NativeMethods.UnregisterHotKey(_windowHandle, hotkey.Id);
-            }
-
-            if (_previousWindowProcedure != nint.Zero)
-            {
-                NativeMethods.SetWindowLongPtr(_windowHandle, NativeMethods.GwlpWndProc, _previousWindowProcedure);
-            }
-
+            NativeMethods.SetWindowLongPtr(_windowHandle, NativeMethods.GwlpWndProc, _previousWindowProcedure);
             _windowHandle = nint.Zero;
             _previousWindowProcedure = nint.Zero;
         }
@@ -148,23 +177,6 @@ public sealed class DesktopShellService : IDesktopShellService
         _notifyIcon.Text = BuildTrayText(snapshot);
     }
 
-    private void RegisterHotkeys()
-    {
-        var warnings = new List<string>();
-        foreach (var hotkey in Hotkeys)
-        {
-            if (!NativeMethods.RegisterHotKey(_windowHandle, hotkey.Id, hotkey.Modifiers, hotkey.VirtualKey))
-            {
-                warnings.Add($"{hotkey.Description} hotkey ({hotkey.DisplayText}) is unavailable because another app is already using it.");
-            }
-        }
-
-        if (warnings.Count > 0)
-        {
-            MessageChanged?.Invoke(this, string.Join(" ", warnings));
-        }
-    }
-
     private nint WindowProcedure(nint hwnd, uint message, nint wParam, nint lParam)
     {
         switch (message)
@@ -173,17 +185,28 @@ public sealed class DesktopShellService : IDesktopShellService
                 _ = HandleHotkeyAsync(wParam.ToInt32());
                 return 0;
             case NativeMethods.WmSize when wParam.ToInt32() == NativeMethods.SizeMinimized:
-                HideWindow("ScreenFast minimized to the tray.");
-                return 0;
+                if (_preferencesService.CurrentSettings.MinimizeToTray)
+                {
+                    HideWindow("ScreenFast minimized to the tray.");
+                    return 0;
+                }
+
+                break;
             case NativeMethods.WmClose when !_allowClose:
-                var statusMessage = _snapshot.State is RecorderState.Recording or RecorderState.Paused
-                    ? "ScreenFast is still recording in the tray."
-                    : "ScreenFast is still running in the tray.";
-                HideWindow(statusMessage);
-                return 0;
-            default:
-                return NativeMethods.CallWindowProc(_previousWindowProcedure, hwnd, message, wParam, lParam);
+                if (_snapshot.State is RecorderState.Recording or RecorderState.Paused || _preferencesService.CurrentSettings.CloseToTray)
+                {
+                    var statusMessage = _snapshot.State is RecorderState.Recording or RecorderState.Paused
+                        ? "ScreenFast is still recording in the tray."
+                        : "ScreenFast is still running in the tray.";
+                    HideWindow(statusMessage);
+                    return 0;
+                }
+
+                _allowClose = true;
+                break;
         }
+
+        return NativeMethods.CallWindowProc(_previousWindowProcedure, hwnd, message, wParam, lParam);
     }
 
     private async Task HandleHotkeyAsync(int hotkeyId)
@@ -192,13 +215,13 @@ public sealed class DesktopShellService : IDesktopShellService
         {
             switch (hotkeyId)
             {
-                case 1:
+                case StartHotkeyId:
                     await _orchestrator.StartRecordingAsync();
                     break;
-                case 2:
+                case StopHotkeyId:
                     await _orchestrator.StopRecordingAsync();
                     break;
-                case 3:
+                case PauseResumeHotkeyId:
                     await _orchestrator.TogglePauseResumeAsync();
                     break;
             }
@@ -259,11 +282,105 @@ public sealed class DesktopShellService : IDesktopShellService
         }
     }
 
+    private OperationResult RegisterHotkeys(HotkeySettings requestedHotkeys, HotkeySettings fallbackHotkeys)
+    {
+        UnregisterHotkeys();
+
+        var attempted = new List<(int Id, HotkeyGesture Gesture)>
+        {
+            (StartHotkeyId, requestedHotkeys.StartRecording),
+            (StopHotkeyId, requestedHotkeys.StopRecording),
+            (PauseResumeHotkeyId, requestedHotkeys.PauseResumeRecording)
+        };
+
+        var registered = new List<int>();
+        foreach (var item in attempted)
+        {
+            if (!NativeMethods.RegisterHotKey(_windowHandle, item.Id, ToNativeModifiers(item.Gesture), (uint)item.Gesture.VirtualKey))
+            {
+                foreach (var hotkeyId in registered)
+                {
+                    NativeMethods.UnregisterHotKey(_windowHandle, hotkeyId);
+                }
+
+                if (!Equals(requestedHotkeys, fallbackHotkeys))
+                {
+                    RegisterHotkeys(fallbackHotkeys, fallbackHotkeys);
+                }
+
+                return OperationResult.Failure(
+                    AppError.InvalidState($"The hotkey {item.Gesture.DisplayText} is already in use by another app. ScreenFast kept the previous shortcuts."));
+            }
+
+            registered.Add(item.Id);
+        }
+
+        return OperationResult.Success();
+    }
+
+    private void UnregisterHotkeys()
+    {
+        if (_windowHandle == nint.Zero)
+        {
+            return;
+        }
+
+        NativeMethods.UnregisterHotKey(_windowHandle, StartHotkeyId);
+        NativeMethods.UnregisterHotKey(_windowHandle, StopHotkeyId);
+        NativeMethods.UnregisterHotKey(_windowHandle, PauseResumeHotkeyId);
+    }
+
+    private static OperationResult ValidateHotkeys(HotkeySettings hotkeys)
+    {
+        var gestures = new[]
+        {
+            hotkeys.StartRecording,
+            hotkeys.StopRecording,
+            hotkeys.PauseResumeRecording
+        };
+
+        if (gestures.Any(gesture => !gesture.HasAnyModifier))
+        {
+            return OperationResult.Failure(AppError.InvalidState("Each hotkey must include at least one modifier key."));
+        }
+
+        if (gestures.Any(gesture => gesture.VirtualKey is < 0x70 or > 0x87))
+        {
+            return OperationResult.Failure(AppError.InvalidState("ScreenFast hotkeys currently support function keys F1 through F24."));
+        }
+
+        if (gestures.Distinct().Count() != gestures.Length)
+        {
+            return OperationResult.Failure(AppError.InvalidState("Each ScreenFast hotkey must be unique."));
+        }
+
+        return OperationResult.Success();
+    }
+
+    private static uint ToNativeModifiers(HotkeyGesture gesture)
+    {
+        var modifiers = 0u;
+        if (gesture.Control)
+        {
+            modifiers |= NativeMethods.ModControl;
+        }
+
+        if (gesture.Shift)
+        {
+            modifiers |= NativeMethods.ModShift;
+        }
+
+        if (gesture.Alt)
+        {
+            modifiers |= NativeMethods.ModAlt;
+        }
+
+        return modifiers;
+    }
+
     private static string BuildTrayText(RecorderStatusSnapshot snapshot)
     {
         var text = $"ScreenFast: {snapshot.State}";
         return text.Length <= 63 ? text : text[..63];
     }
-
-    private sealed record HotkeyDefinition(int Id, string Description, string DisplayText, uint Modifiers, uint VirtualKey);
 }

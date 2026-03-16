@@ -1,4 +1,4 @@
-﻿namespace ScreenFast.Core.Models;
+namespace ScreenFast.Core.Models;
 
 public sealed record RecordingSessionInfo(
     string FilePath,
@@ -7,4 +7,5 @@ public sealed record RecordingSessionInfo(
     int FrameRate,
     bool IncludesSystemAudio,
     bool IncludesMicrophone,
+    VideoQualityPreset QualityPreset,
     string? WarningMessage);

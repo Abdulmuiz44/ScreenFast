@@ -6,114 +6,210 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24" RowSpacing="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <ScrollViewer>
+        <Grid Padding="24" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-        <StackPanel Spacing="4">
-            <TextBlock FontSize="28" FontWeight="SemiBold" Text="ScreenFast" />
-            <TextBlock Opacity="0.72" Text="Native screen recording for everyday Windows use." />
-        </StackPanel>
-
-        <Grid Grid.Row="1" ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <Button
-                MinWidth="180"
-                Command="{x:Bind ViewModel.SelectSourceCommand}"
-                Content="Select Source" />
-
-            <StackPanel Grid.Column="1" Spacing="2">
-                <TextBlock FontWeight="SemiBold" Text="{x:Bind ViewModel.SourceSummary, Mode=OneWay}" />
-                <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SourceDetails, Mode=OneWay}" />
-                <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SourceIdText, Mode=OneWay}" />
-            </StackPanel>
-        </Grid>
-
-        <Grid Grid.Row="2" ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <Button
-                MinWidth="180"
-                Command="{x:Bind ViewModel.PickOutputFolderCommand}"
-                Content="Choose Output Folder" />
-
-            <TextBlock
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                Opacity="0.72"
-                Text="{x:Bind ViewModel.OutputFolderText, Mode=OneWay}" />
-        </Grid>
-
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="20">
-            <ToggleSwitch
-                Header="System Audio"
-                IsOn="{x:Bind ViewModel.IncludeSystemAudio, Mode=TwoWay}" />
-            <ToggleSwitch
-                Header="Microphone"
-                IsOn="{x:Bind ViewModel.IncludeMicrophone, Mode=TwoWay}" />
-        </StackPanel>
-
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12">
-            <Button
-                MinWidth="120"
-                Command="{x:Bind ViewModel.RecordCommand}"
-                Content="Record" />
-            <Button
-                MinWidth="120"
-                Command="{x:Bind ViewModel.PauseResumeCommand}"
-                Content="{x:Bind ViewModel.PauseResumeText, Mode=OneWay}" />
-            <Button
-                MinWidth="120"
-                Command="{x:Bind ViewModel.StopCommand}"
-                Content="Stop" />
-        </StackPanel>
-
-        <Grid Grid.Row="5" ColumnSpacing="16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <TextBlock FontWeight="SemiBold" Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
-            <TextBlock Grid.Column="1" FontFamily="Consolas" Text="{x:Bind ViewModel.TimerText, Mode=OneWay}" />
-        </Grid>
-
-        <Border
-            Grid.Row="6"
-            Padding="12"
-            Background="{ThemeResource AccentFillColorSecondaryBrush}"
-            CornerRadius="8">
             <StackPanel Spacing="4">
-                <TextBlock FontWeight="SemiBold" Text="Tray and Hotkeys" />
-                <TextBlock Opacity="0.84" Text="Start: Ctrl+Shift+F9  |  Stop: Ctrl+Shift+F10  |  Pause/Resume: Ctrl+Shift+F11" TextWrapping="WrapWholeWords" />
-                <TextBlock Opacity="0.84" Text="{x:Bind ViewModel.ShellMessageText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
+                <TextBlock FontSize="28" FontWeight="SemiBold" Text="ScreenFast" />
+                <TextBlock Opacity="0.72" Text="Native screen recording for everyday Windows use." />
             </StackPanel>
-        </Border>
 
-        <Border
-            Grid.Row="7"
-            Padding="16"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            CornerRadius="8">
-            <StackPanel Spacing="6">
-                <TextBlock FontWeight="SemiBold" Text="Recorder State" />
-                <TextBlock Text="{x:Bind ViewModel.StateText, Mode=OneWay}" />
+            <Grid Grid.Row="1" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Button
+                    MinWidth="180"
+                    Command="{x:Bind ViewModel.SelectSourceCommand}"
+                    Content="Select Source" />
+
+                <StackPanel Grid.Column="1" Spacing="2">
+                    <TextBlock FontWeight="SemiBold" Text="{x:Bind ViewModel.SourceSummary, Mode=OneWay}" />
+                    <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SourceDetails, Mode=OneWay}" />
+                    <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SourceIdText, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+
+            <Grid Grid.Row="2" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Button
+                    MinWidth="180"
+                    Command="{x:Bind ViewModel.PickOutputFolderCommand}"
+                    Content="Choose Output Folder" />
+
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Opacity="0.72"
+                    Text="{x:Bind ViewModel.OutputFolderText, Mode=OneWay}" />
+            </Grid>
+
+            <Grid Grid.Row="3" ColumnSpacing="20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Quality" />
+                <ComboBox
+                    Grid.Column="1"
+                    DisplayMemberPath="Label"
+                    ItemsSource="{x:Bind ViewModel.QualityPresets, Mode=OneWay}"
+                    SelectedItem="{x:Bind ViewModel.SelectedQualityPreset, Mode=TwoWay}" />
+                <ToggleSwitch
+                    Grid.Column="2"
+                    Header="System Audio"
+                    IsOn="{x:Bind ViewModel.IncludeSystemAudio, Mode=TwoWay}" />
+                <ToggleSwitch
+                    Grid.Column="3"
+                    Header="Microphone"
+                    IsOn="{x:Bind ViewModel.IncludeMicrophone, Mode=TwoWay}" />
+            </Grid>
+
+            <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12">
+                <Button
+                    MinWidth="120"
+                    Command="{x:Bind ViewModel.RecordCommand}"
+                    Content="Record" />
+                <Button
+                    MinWidth="120"
+                    Command="{x:Bind ViewModel.PauseResumeCommand}"
+                    Content="{x:Bind ViewModel.PauseResumeText, Mode=OneWay}" />
+                <Button
+                    MinWidth="120"
+                    Command="{x:Bind ViewModel.StopCommand}"
+                    Content="Stop" />
             </StackPanel>
-        </Border>
-    </Grid>
+
+            <Grid Grid.Row="5" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock FontWeight="SemiBold" Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
+                <TextBlock Grid.Column="1" FontFamily="Consolas" Text="{x:Bind ViewModel.TimerText, Mode=OneWay}" />
+            </Grid>
+
+            <Border
+                Grid.Row="6"
+                Padding="16"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="8">
+                <StackPanel Spacing="12">
+                    <TextBlock FontWeight="SemiBold" Text="Startup and Tray" />
+                    <StackPanel Orientation="Horizontal" Spacing="20">
+                        <ToggleSwitch
+                            Header="Launch Minimized"
+                            IsOn="{x:Bind ViewModel.LaunchMinimizedToTray, Mode=TwoWay}" />
+                        <ToggleSwitch
+                            Header="Close To Tray"
+                            IsOn="{x:Bind ViewModel.CloseToTray, Mode=TwoWay}" />
+                        <ToggleSwitch
+                            Header="Minimize To Tray"
+                            IsOn="{x:Bind ViewModel.MinimizeToTray, Mode=TwoWay}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border
+                Grid.Row="7"
+                Padding="16"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="8">
+                <StackPanel Spacing="12">
+                    <TextBlock FontWeight="SemiBold" Text="Hotkeys" />
+                    <Grid ColumnSpacing="12" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="220" />
+                            <ColumnDefinition Width="140" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock VerticalAlignment="Center" Text="Start Recording" />
+                        <ComboBox
+                            Grid.Column="1"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{x:Bind ViewModel.HotkeyModifiers, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.StartHotkeyModifier, Mode=TwoWay}" />
+                        <ComboBox
+                            Grid.Column="2"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{x:Bind ViewModel.HotkeyKeys, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.StartHotkeyKey, Mode=TwoWay}" />
+
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Stop Recording" />
+                        <ComboBox
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{x:Bind ViewModel.HotkeyModifiers, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.StopHotkeyModifier, Mode=TwoWay}" />
+                        <ComboBox
+                            Grid.Row="1"
+                            Grid.Column="2"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{x:Bind ViewModel.HotkeyKeys, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.StopHotkeyKey, Mode=TwoWay}" />
+
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Pause / Resume" />
+                        <ComboBox
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{x:Bind ViewModel.HotkeyModifiers, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.PauseHotkeyModifier, Mode=TwoWay}" />
+                        <ComboBox
+                            Grid.Row="2"
+                            Grid.Column="2"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{x:Bind ViewModel.HotkeyKeys, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.PauseHotkeyKey, Mode=TwoWay}" />
+                    </Grid>
+
+                    <Button
+                        Width="140"
+                        Command="{x:Bind ViewModel.ApplyHotkeysCommand}"
+                        Content="Apply Hotkeys" />
+                </StackPanel>
+            </Border>
+
+            <Border
+                Grid.Row="8"
+                Padding="12"
+                Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                CornerRadius="8">
+                <StackPanel Spacing="4">
+                    <TextBlock FontWeight="SemiBold" Text="Tray and Status" />
+                    <TextBlock Opacity="0.84" Text="The tray icon keeps ScreenFast available for hotkeys, startup, and safe close behavior." TextWrapping="WrapWholeWords" />
+                    <TextBlock Opacity="0.84" Text="{x:Bind ViewModel.ShellMessageText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
+                    <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.StateText, Mode=OneWay}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </ScrollViewer>
 </Window>

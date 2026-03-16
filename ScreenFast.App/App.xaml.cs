@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using ScreenFast.App.Services;
 
@@ -18,8 +18,13 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        var preferencesService = Services.GetRequiredService<IAppPreferencesService>();
+        preferencesService.InitializeAsync().GetAwaiter().GetResult();
+
         _window = Services.GetRequiredService<MainWindow>();
         _window.Activate();
+
+        Services.GetRequiredService<IDesktopShellService>().ApplyStartupBehavior();
     }
 
     private static IServiceProvider ConfigureServices()

@@ -108,13 +108,14 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 }
             }
 
+            var qualityDefinition = VideoQualityPresets.Get(request.QualityPreset);
             var includeAudioStream = includeSystemAudio || includeMicrophone;
             _writer = new MediaFoundationMp4Writer(
                 _outputPath,
                 _captureSession.NativeDevicePointer,
                 _captureSession.Width,
                 _captureSession.Height,
-                30,
+                qualityDefinition,
                 includeAudioStream);
 
             _writer.Start();
@@ -136,9 +137,10 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                     _outputPath,
                     _captureSession.Width,
                     _captureSession.Height,
-                    30,
+                    qualityDefinition.FrameRate,
                     includeSystemAudio,
                     includeMicrophone,
+                    request.QualityPreset,
                     warnings.Count == 0 ? null : string.Join(" ", warnings)));
         }
         catch (Exception ex)
@@ -597,9 +599,9 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         private long _audioFramesWritten;
         private bool _isFinalized;
 
-        public MediaFoundationMp4Writer(string outputPath, nint devicePointer, int width, int height, int frameRate, bool includeAudio)
+        public MediaFoundationMp4Writer(string outputPath, nint devicePointer, int width, int height, VideoQualityPresetDefinition qualityDefinition, bool includeAudio)
         {
-            _defaultFrameDuration = 10_000_000L / frameRate;
+            _defaultFrameDuration = 10_000_000L / qualityDefinition.FrameRate;
 
             MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFCreateDXGIDeviceManager(out var resetToken, out _deviceManager));
             MediaFoundationNative.ThrowIfFailed(_deviceManager.ResetDevice(devicePointer, resetToken));
@@ -616,10 +618,10 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 MediaFoundationNative.ThrowIfFailed(attributes.SetUnknown(MediaFoundationNative.MFSinkWriterD3DManager, _deviceManager));
                 MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFCreateSinkWriterFromURL(outputPath, nint.Zero, attributes, out _sinkWriter));
 
-                outputVideoType = CreateOutputVideoMediaType(width, height, frameRate);
+                outputVideoType = CreateOutputVideoMediaType(width, height, qualityDefinition.FrameRate, qualityDefinition.TargetBitrate);
                 MediaFoundationNative.ThrowIfFailed(_sinkWriter.AddStream(outputVideoType, out _videoStreamIndex));
 
-                inputVideoType = CreateInputVideoMediaType(width, height, frameRate);
+                inputVideoType = CreateInputVideoMediaType(width, height, qualityDefinition.FrameRate);
                 MediaFoundationNative.ThrowIfFailed(_sinkWriter.SetInputMediaType(_videoStreamIndex, inputVideoType, null));
 
                 if (includeAudio)
@@ -792,12 +794,12 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
         private static readonly Guid Direct3D11Texture2DGuid = new("6F15AAF2-D208-4E89-9AB4-489535D34F9C");
 
-        private static MediaFoundationNative.IMFMediaType CreateOutputVideoMediaType(int width, int height, int frameRate)
+        private static MediaFoundationNative.IMFMediaType CreateOutputVideoMediaType(int width, int height, int frameRate, uint targetBitrate)
         {
             MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFCreateMediaType(out var mediaType));
             MediaFoundationNative.ThrowIfFailed(mediaType.SetGUID(MediaFoundationNative.MFMtMajorType, MediaFoundationNative.MFMediaTypeVideo));
             MediaFoundationNative.ThrowIfFailed(mediaType.SetGUID(MediaFoundationNative.MFMtSubtype, MediaFoundationNative.MFVideoFormatH264));
-            MediaFoundationNative.ThrowIfFailed(mediaType.SetUINT32(MediaFoundationNative.MFMtAvgBitrate, CalculateBitrate(width, height, frameRate)));
+            MediaFoundationNative.ThrowIfFailed(mediaType.SetUINT32(MediaFoundationNative.MFMtAvgBitrate, targetBitrate));
             MediaFoundationNative.ThrowIfFailed(mediaType.SetUINT32(MediaFoundationNative.MFMtInterlaceMode, MediaFoundationNative.ProgressiveInterlaceMode));
             MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFSetAttributeSize(mediaType, MediaFoundationNative.MFMtFrameSize, (uint)width, (uint)height));
             MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFSetAttributeRatio(mediaType, MediaFoundationNative.MFMtFrameRate, (uint)frameRate, 1));
@@ -852,3 +854,5 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         }
     }
 }
+
+

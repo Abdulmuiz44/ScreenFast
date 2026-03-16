@@ -9,6 +9,7 @@ internal static class NativeMethods
     internal const uint WmClose = 0x0010;
     internal const uint WmHotKey = 0x0312;
     internal const int SizeMinimized = 1;
+    internal const uint ModAlt = 0x0001;
     internal const uint ModControl = 0x0002;
     internal const uint ModShift = 0x0004;
     internal const int SwHide = 0;

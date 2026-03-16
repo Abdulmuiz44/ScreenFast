@@ -18,6 +18,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICaptureItemResolver, GraphicsCaptureItemResolver>();
         services.AddSingleton<ICaptureSessionFactory, GraphicsCaptureSessionFactory>();
         services.AddSingleton<IOutputFolderPickerService, OutputFolderPickerService>();
+        services.AddSingleton<IAppSettingsStore, JsonAppSettingsStore>();
+        services.AddSingleton<IAppPreferencesService, AppPreferencesService>();
         services.AddSingleton<IRecordingEncoderService, MediaFoundationRecordingEncoderService>();
         services.AddSingleton<ISystemAudioCaptureService, WasapiLoopbackCaptureService>();
         services.AddSingleton<IMicrophoneCaptureService, MicrophoneCaptureService>();

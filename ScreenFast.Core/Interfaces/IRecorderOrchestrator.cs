@@ -10,7 +10,11 @@ public interface IRecorderOrchestrator
 
     void SetWindowHandle(nint windowHandle);
 
+    void ApplyPersistedSettings(AppSettings settings, CaptureSourceModel? restoredSource, string? startupMessage);
+
     void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone);
+
+    void UpdateQualityPreset(VideoQualityPreset preset);
 
     Task SelectSourceAsync(CancellationToken cancellationToken = default);
 
