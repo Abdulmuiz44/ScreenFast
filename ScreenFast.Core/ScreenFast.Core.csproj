@@ -2,4 +2,8 @@
   <PropertyGroup>
     <RootNamespace>ScreenFast.Core</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+  </ItemGroup>
 </Project>

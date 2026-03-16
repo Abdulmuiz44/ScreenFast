@@ -6,4 +6,8 @@
   <ItemGroup>
     <ProjectReference Include="..\ScreenFast.Core\ScreenFast.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+  </ItemGroup>
 </Project>

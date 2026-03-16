@@ -5,7 +5,7 @@ namespace ScreenFast.Core.Interfaces;
 
 public interface IRecordingEncoderService
 {
-    Task<OperationResult> StartAsync(RecordingStartRequest request, CancellationToken cancellationToken = default);
+    Task<OperationResult<RecordingSessionInfo>> StartAsync(RecordingStartRequest request, CancellationToken cancellationToken = default);
 
-    Task<OperationResult> StopAsync(CancellationToken cancellationToken = default);
+    Task<OperationResult<string>> StopAsync(CancellationToken cancellationToken = default);
 }

@@ -11,7 +11,10 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
     private readonly IOutputFolderPickerService _outputFolderPickerService;
     private readonly IRecordingEncoderService _recordingEncoderService;
     private readonly RecorderStateMachine _stateMachine = new();
+
     private nint _windowHandle;
+    private CancellationTokenSource? _timerCancellationSource;
+    private DateTimeOffset _recordingStartedAt;
 
     public RecorderOrchestrator(
         ICaptureSourcePickerService captureSourcePickerService,
@@ -88,6 +91,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             return;
         }
 
+        ResetTimer();
         _stateMachine.TransitionTo(RecorderState.Error);
         Publish(Snapshot with
         {
@@ -108,12 +112,21 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         var result = await _outputFolderPickerService.PickOutputFolderAsync(_windowHandle, cancellationToken);
         if (result.IsSuccess && !string.IsNullOrWhiteSpace(result.Value))
         {
+            var nextState = Snapshot.SelectedSource is null ? RecorderState.Idle : RecorderState.Ready;
+            _stateMachine.TransitionTo(nextState);
             Publish(Snapshot with
             {
+                State = nextState,
                 OutputFolder = result.Value,
                 StatusMessage = "Output folder selected."
             });
 
+            return;
+        }
+
+        if (result.IsSuccess)
+        {
+            Publish(Snapshot with { StatusMessage = "Output folder selection cancelled." });
             return;
         }
 
@@ -125,6 +138,12 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
 
     public async Task StartRecordingAsync(CancellationToken cancellationToken = default)
     {
+        if (Snapshot.State == RecorderState.Recording)
+        {
+            Publish(Snapshot with { StatusMessage = "Recording is already in progress." });
+            return;
+        }
+
         if (Snapshot.SelectedSource is null)
         {
             Publish(Snapshot with { StatusMessage = "Select a source before recording." });
@@ -147,7 +166,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         Publish(Snapshot with
         {
             State = RecorderState.Recording,
-            StatusMessage = "Starting recording..."
+            StatusMessage = "Starting recording...",
+            TimerText = "00:00:00"
         });
 
         var result = await _recordingEncoderService.StartAsync(
@@ -158,12 +178,19 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
                 Snapshot.IncludeMicrophone),
             cancellationToken);
 
-        if (result.IsSuccess)
+        if (result.IsSuccess && result.Value is not null)
         {
-            Publish(Snapshot with { StatusMessage = "Recording started." });
+            _recordingStartedAt = DateTimeOffset.UtcNow;
+            StartTimer();
+            Publish(Snapshot with
+            {
+                State = RecorderState.Recording,
+                StatusMessage = $"Recording to {Path.GetFileName(result.Value.FilePath)}"
+            });
             return;
         }
 
+        ResetTimer();
         _stateMachine.TransitionTo(RecorderState.Error);
         Publish(Snapshot with
         {
@@ -174,7 +201,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
 
     public async Task StopRecordingAsync(CancellationToken cancellationToken = default)
     {
-        if (Snapshot.State is not (RecorderState.Recording or RecorderState.Stopping))
+        if (Snapshot.State != RecorderState.Recording)
         {
             Publish(Snapshot with { StatusMessage = "There is no active recording to stop." });
             return;
@@ -193,20 +220,71 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             StatusMessage = "Stopping recording..."
         });
 
-        await _recordingEncoderService.StopAsync(cancellationToken);
-        _stateMachine.TransitionTo(RecorderState.Idle);
+        var stopResult = await _recordingEncoderService.StopAsync(cancellationToken);
+        ResetTimer();
 
+        if (!stopResult.IsSuccess || string.IsNullOrWhiteSpace(stopResult.Value))
+        {
+            _stateMachine.TransitionTo(RecorderState.Error);
+            Publish(Snapshot with
+            {
+                State = RecorderState.Error,
+                StatusMessage = stopResult.Error?.Message ?? "ScreenFast could not finalize the recording."
+            });
+            return;
+        }
+
+        var nextState = Snapshot.SelectedSource is not null && !string.IsNullOrWhiteSpace(Snapshot.OutputFolder)
+            ? RecorderState.Ready
+            : RecorderState.Idle;
+
+        _stateMachine.TransitionTo(nextState);
         Publish(Snapshot with
         {
-            State = RecorderState.Idle,
-            StatusMessage = "Recording stopped.",
-            SelectedSource = null,
+            State = nextState,
+            StatusMessage = $"Saved MP4 to {stopResult.Value}",
             TimerText = "00:00:00"
         });
     }
 
+    private void StartTimer()
+    {
+        ResetTimer();
+        _timerCancellationSource = new CancellationTokenSource();
+        _ = RunTimerLoopAsync(_timerCancellationSource.Token);
+    }
+
+    private async Task RunTimerLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                var elapsed = DateTimeOffset.UtcNow - _recordingStartedAt;
+                Publish(Snapshot with { TimerText = elapsed.ToString(@"hh\:mm\:ss") });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void ResetTimer()
+    {
+        if (_timerCancellationSource is not null)
+        {
+            _timerCancellationSource.Cancel();
+            _timerCancellationSource.Dispose();
+            _timerCancellationSource = null;
+        }
+
+        Publish(Snapshot with { TimerText = "00:00:00" });
+    }
+
     private void PublishError(AppError error)
     {
+        ResetTimer();
         _stateMachine.TransitionTo(RecorderState.Error);
         Publish(Snapshot with
         {

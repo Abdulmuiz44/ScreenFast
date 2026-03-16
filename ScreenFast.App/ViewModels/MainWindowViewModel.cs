@@ -1,4 +1,5 @@
-﻿using ScreenFast.App.Commands;
+﻿using Microsoft.UI.Dispatching;
+using ScreenFast.App.Commands;
 using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
 using ScreenFast.Core.State;
@@ -8,6 +9,7 @@ namespace ScreenFast.App.ViewModels;
 public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly IRecorderOrchestrator _orchestrator;
+    private readonly DispatcherQueue? _dispatcherQueue;
     private RecorderStatusSnapshot _snapshot;
     private bool _includeSystemAudio;
     private bool _includeMicrophone;
@@ -15,6 +17,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(IRecorderOrchestrator orchestrator)
     {
         _orchestrator = orchestrator;
+        _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _snapshot = orchestrator.Snapshot;
         _includeSystemAudio = _snapshot.IncludeSystemAudio;
         _includeMicrophone = _snapshot.IncludeMicrophone;
@@ -87,7 +90,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool CanRecord => _snapshot.State == RecorderState.Ready && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
 
-    public bool CanStop => _snapshot.State is RecorderState.Recording or RecorderState.Stopping;
+    public bool CanStop => _snapshot.State == RecorderState.Recording;
 
     public void InitializeWindowHandle(nint windowHandle)
     {
@@ -95,6 +98,17 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     private void OnSnapshotChanged(object? sender, RecorderStatusSnapshot snapshot)
+    {
+        if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(() => ApplySnapshot(snapshot));
+            return;
+        }
+
+        ApplySnapshot(snapshot);
+    }
+
+    private void ApplySnapshot(RecorderStatusSnapshot snapshot)
     {
         _snapshot = snapshot;
         _includeSystemAudio = snapshot.IncludeSystemAudio;
