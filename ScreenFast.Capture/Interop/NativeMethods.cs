@@ -18,6 +18,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(nint windowHandle);
 
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(nint windowHandle);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetWindowText(nint windowHandle, StringBuilder text, int maxCount);
 

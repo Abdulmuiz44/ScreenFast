@@ -12,10 +12,13 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddScreenFast(this IServiceCollection services)
     {
+        services.AddSingleton<Direct3D11DeviceProvider>();
         services.AddSingleton<GraphicsCaptureSourceResolver>();
         services.AddSingleton<ICaptureSourcePickerService, WindowsGraphicsCaptureSourcePickerService>();
-        services.AddSingleton<IOutputFolderPickerService, StubOutputFolderPickerService>();
-        services.AddSingleton<IRecordingEncoderService, StubRecordingEncoderService>();
+        services.AddSingleton<ICaptureItemResolver, GraphicsCaptureItemResolver>();
+        services.AddSingleton<ICaptureSessionFactory, GraphicsCaptureSessionFactory>();
+        services.AddSingleton<IOutputFolderPickerService, OutputFolderPickerService>();
+        services.AddSingleton<IRecordingEncoderService, MediaFoundationRecordingEncoderService>();
         services.AddSingleton<ISystemAudioCaptureService, NoOpSystemAudioCaptureService>();
         services.AddSingleton<IMicrophoneCaptureService, NoOpMicrophoneCaptureService>();
         services.AddSingleton<IRecorderOrchestrator, RecorderOrchestrator>();
