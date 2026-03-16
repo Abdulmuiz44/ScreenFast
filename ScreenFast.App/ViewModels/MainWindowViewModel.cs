@@ -1,20 +1,25 @@
+using System.Collections.ObjectModel;
+using System.Linq;
 using Microsoft.UI.Dispatching;
-using ScreenFast.App.Services;
 using ScreenFast.App.Commands;
+using ScreenFast.App.Services;
 using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
-using ScreenFast.Core.Results;
 using ScreenFast.Core.State;
+using DataTransfer = Windows.ApplicationModel.DataTransfer;
 
 namespace ScreenFast.App.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly IRecorderOrchestrator _orchestrator;
-    private readonly IAppPreferencesService _preferencesService;
+    private readonly IRecordingHistoryService _historyService;
+    private readonly IFileLauncherService _fileLauncherService;
     private readonly IDesktopShellService _desktopShellService;
+    private readonly IAppPreferencesService _preferencesService;
     private readonly DispatcherQueue? _dispatcherQueue;
     private readonly IReadOnlyList<VideoQualityPresetOption> _qualityPresets;
+    private readonly IReadOnlyList<PostRecordingOpenBehaviorOption> _postRecordingBehaviors;
     private readonly IReadOnlyList<HotkeyModifierOption> _hotkeyModifiers;
     private readonly IReadOnlyList<HotkeyKeyOption> _hotkeyKeys;
 
@@ -23,6 +28,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _includeMicrophone;
     private string? _shellMessage;
     private VideoQualityPresetOption? _selectedQualityPreset;
+    private PostRecordingOpenBehaviorOption? _selectedPostRecordingBehavior;
     private bool _launchMinimizedToTray;
     private bool _closeToTray;
     private bool _minimizeToTray;
@@ -32,28 +38,41 @@ public sealed class MainWindowViewModel : ObservableObject
     private HotkeyKeyOption? _startHotkeyKey;
     private HotkeyKeyOption? _stopHotkeyKey;
     private HotkeyKeyOption? _pauseHotkeyKey;
+    private RecordingHistoryItemViewModel? _selectedRecentRecording;
+    private bool _isOnboardingDismissed;
 
     public MainWindowViewModel(
         IRecorderOrchestrator orchestrator,
-        IAppPreferencesService preferencesService,
-        IDesktopShellService desktopShellService)
+        IRecordingHistoryService historyService,
+        IFileLauncherService fileLauncherService,
+        IDesktopShellService desktopShellService,
+        IAppPreferencesService preferencesService)
     {
         _orchestrator = orchestrator;
-        _preferencesService = preferencesService;
+        _historyService = historyService;
+        _fileLauncherService = fileLauncherService;
         _desktopShellService = desktopShellService;
+        _preferencesService = preferencesService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _snapshot = orchestrator.Snapshot;
-        _includeSystemAudio = _snapshot.IncludeSystemAudio;
-        _includeMicrophone = _snapshot.IncludeMicrophone;
-
         _qualityPresets = VideoQualityPresets.All
             .Select(definition => new VideoQualityPresetOption(definition.Preset, definition.DisplayName))
             .ToArray();
+        _postRecordingBehaviors =
+        [
+            new(PostRecordingOpenBehavior.None, "Do Nothing"),
+            new(PostRecordingOpenBehavior.OpenFile, "Open Recording"),
+            new(PostRecordingOpenBehavior.OpenContainingFolder, "Open Folder")
+        ];
         _hotkeyModifiers = HotkeyModifierOption.CreateDefaults();
         _hotkeyKeys = HotkeyKeyOption.CreateDefaults();
+        RecentRecordings = new ObservableCollection<RecordingHistoryItemViewModel>();
 
         ApplySettings(_preferencesService.CurrentSettings);
+        _includeSystemAudio = _snapshot.IncludeSystemAudio;
+        _includeMicrophone = _snapshot.IncludeMicrophone;
         _selectedQualityPreset = FindQualityPreset(_snapshot.QualityPreset);
+        _selectedPostRecordingBehavior = FindPostRecordingBehavior(_snapshot.PostRecordingOpenBehavior);
 
         SelectSourceCommand = new AsyncRelayCommand(() => _orchestrator.SelectSourceAsync(), () => CanSelectSource);
         PickOutputFolderCommand = new AsyncRelayCommand(() => _orchestrator.ChooseOutputFolderAsync(), () => CanPickOutputFolder);
@@ -61,28 +80,55 @@ public sealed class MainWindowViewModel : ObservableObject
         PauseResumeCommand = new AsyncRelayCommand(() => _orchestrator.TogglePauseResumeAsync(), () => CanPauseResume);
         StopCommand = new AsyncRelayCommand(() => _orchestrator.StopRecordingAsync(), () => CanStop);
         ApplyHotkeysCommand = new AsyncRelayCommand(ApplyHotkeysAsync);
+        OpenRecordingCommand = new AsyncRelayCommand(OpenRecordingAsync, () => SelectedRecentRecording is not null);
+        OpenContainingFolderCommand = new AsyncRelayCommand(OpenContainingFolderAsync, () => SelectedRecentRecording is not null);
+        CopyPathCommand = new RelayCommand(CopyPath, () => SelectedRecentRecording is not null);
+        RemoveHistoryItemCommand = new AsyncRelayCommand(RemoveHistoryItemAsync, () => SelectedRecentRecording is not null);
+        ClearMissingHistoryCommand = new AsyncRelayCommand(ClearMissingHistoryAsync, () => RecentRecordings.Count > 0);
+        ClearAllHistoryCommand = new AsyncRelayCommand(ClearAllHistoryAsync, () => RecentRecordings.Count > 0);
+        DismissOnboardingCommand = new AsyncRelayCommand(DismissOnboardingAsync, () => IsOnboardingVisible);
+        ShowOnboardingAgainCommand = new AsyncRelayCommand(ShowOnboardingAgainAsync, () => !IsOnboardingVisible);
 
         _orchestrator.SnapshotChanged += OnSnapshotChanged;
         _preferencesService.SettingsChanged += OnSettingsChanged;
     }
 
     public AsyncRelayCommand SelectSourceCommand { get; }
-
     public AsyncRelayCommand PickOutputFolderCommand { get; }
-
     public AsyncRelayCommand RecordCommand { get; }
-
     public AsyncRelayCommand PauseResumeCommand { get; }
-
     public AsyncRelayCommand StopCommand { get; }
-
     public AsyncRelayCommand ApplyHotkeysCommand { get; }
+    public AsyncRelayCommand OpenRecordingCommand { get; }
+    public AsyncRelayCommand OpenContainingFolderCommand { get; }
+    public RelayCommand CopyPathCommand { get; }
+    public AsyncRelayCommand RemoveHistoryItemCommand { get; }
+    public AsyncRelayCommand ClearMissingHistoryCommand { get; }
+    public AsyncRelayCommand ClearAllHistoryCommand { get; }
+    public AsyncRelayCommand DismissOnboardingCommand { get; }
+    public AsyncRelayCommand ShowOnboardingAgainCommand { get; }
+
+    public ObservableCollection<RecordingHistoryItemViewModel> RecentRecordings { get; }
 
     public IReadOnlyList<VideoQualityPresetOption> QualityPresets => _qualityPresets;
+
+    public IReadOnlyList<PostRecordingOpenBehaviorOption> PostRecordingBehaviors => _postRecordingBehaviors;
 
     public IReadOnlyList<HotkeyModifierOption> HotkeyModifiers => _hotkeyModifiers;
 
     public IReadOnlyList<HotkeyKeyOption> HotkeyKeys => _hotkeyKeys;
+
+    public RecordingHistoryItemViewModel? SelectedRecentRecording
+    {
+        get => _selectedRecentRecording;
+        set
+        {
+            if (SetProperty(ref _selectedRecentRecording, value))
+            {
+                RefreshCommands();
+            }
+        }
+    }
 
     public string StatusText => _snapshot.StatusMessage;
 
@@ -110,6 +156,50 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string ShellMessageText => _shellMessage ?? string.Empty;
 
+    public bool IsOnboardingVisible => !_isOnboardingDismissed;
+
+    public string ReadySourceText => IsSourceReady ? "Source selected" : "Source missing";
+
+    public string ReadyOutputFolderText
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_snapshot.OutputFolder))
+            {
+                return "Output folder missing";
+            }
+
+            return Directory.Exists(_snapshot.OutputFolder)
+                ? "Output folder available"
+                : "Output folder unavailable";
+        }
+    }
+
+    public string AudioChoicesSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (_includeSystemAudio)
+            {
+                parts.Add("System audio");
+            }
+
+            if (_includeMicrophone)
+            {
+                parts.Add("Microphone");
+            }
+
+            return parts.Count == 0 ? "Audio: none" : $"Audio: {string.Join(" + ", parts)}";
+        }
+    }
+
+    public string RecentRecordingsStatusText => HasRecentRecordings
+        ? "Newest first. Missing files remain listed until removed."
+        : "No recordings yet. Finished recordings will appear here.";
+
+    public bool HasRecentRecordings => RecentRecordings.Count > 0;
+
     public bool IncludeSystemAudio
     {
         get => _includeSystemAudio;
@@ -117,7 +207,9 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _includeSystemAudio, value))
             {
-                _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone);
+                _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone, SelectedPostRecordingBehavior?.Behavior ?? PostRecordingOpenBehavior.None);
+                RaisePropertyChanged(nameof(AudioChoicesSummary));
+                _ = SavePreferencesAsync();
             }
         }
     }
@@ -129,7 +221,9 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _includeMicrophone, value))
             {
-                _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone);
+                _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone, SelectedPostRecordingBehavior?.Behavior ?? PostRecordingOpenBehavior.None);
+                RaisePropertyChanged(nameof(AudioChoicesSummary));
+                _ = SavePreferencesAsync();
             }
         }
     }
@@ -142,6 +236,20 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _selectedQualityPreset, value) && value is not null)
             {
                 _orchestrator.UpdateQualityPreset(value.Preset);
+                _ = SavePreferencesAsync();
+            }
+        }
+    }
+
+    public PostRecordingOpenBehaviorOption? SelectedPostRecordingBehavior
+    {
+        get => _selectedPostRecordingBehavior;
+        set
+        {
+            if (SetProperty(ref _selectedPostRecordingBehavior, value) && value is not null)
+            {
+                _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone, value.Behavior);
+                _ = SavePreferencesAsync();
             }
         }
     }
@@ -222,15 +330,24 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool CanPickOutputFolder => _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
 
-    public bool CanRecord => _snapshot.State == RecorderState.Ready && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
+    public bool CanRecord => _snapshot.State == RecorderState.Ready && IsSourceReady && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
 
     public bool CanPauseResume => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
 
     public bool CanStop => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
 
-    public void InitializeWindowHandle(nint windowHandle)
+    private bool IsSourceReady => _snapshot.SelectedSource is not null && _snapshot.SelectedSource.Width > 0 && _snapshot.SelectedSource.Height > 0;
+
+    public void InitializeWindowHandle(nint windowHandle) => _orchestrator.SetWindowHandle(windowHandle);
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        _orchestrator.SetWindowHandle(windowHandle);
+        ApplySettings(_preferencesService.CurrentSettings);
+        _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone, SelectedPostRecordingBehavior?.Behavior ?? PostRecordingOpenBehavior.None);
+        _orchestrator.UpdateQualityPreset(SelectedQualityPreset?.Preset ?? VideoQualityPreset.Standard);
+
+        await _historyService.RefreshAvailabilityAsync(cancellationToken);
+        await ReloadHistoryAsync(cancellationToken);
     }
 
     public void SetShellMessage(string? message)
@@ -242,6 +359,25 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         ApplyShellMessage(message);
+    }
+
+    private async Task ReloadHistoryAsync(CancellationToken cancellationToken = default)
+    {
+        var entries = await _historyService.GetRecentAsync(cancellationToken);
+        RecentRecordings.Clear();
+        foreach (var entry in entries)
+        {
+            RecentRecordings.Add(new RecordingHistoryItemViewModel(entry));
+        }
+
+        if (SelectedRecentRecording is not null)
+        {
+            SelectedRecentRecording = RecentRecordings.FirstOrDefault(x => x.Id == SelectedRecentRecording.Id);
+        }
+
+        RaisePropertyChanged(nameof(HasRecentRecordings));
+        RaisePropertyChanged(nameof(RecentRecordingsStatusText));
+        RefreshCommands();
     }
 
     private async Task ApplyHotkeysAsync()
@@ -277,17 +413,49 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task SavePreferencesAsync()
+    {
+        var result = await _preferencesService.UpdateRecorderPreferencesAsync(
+            _includeSystemAudio,
+            _includeMicrophone,
+            SelectedQualityPreset?.Preset ?? VideoQualityPreset.Standard,
+            SelectedPostRecordingBehavior?.Behavior ?? PostRecordingOpenBehavior.None,
+            _isOnboardingDismissed);
+
+        if (!result.IsSuccess)
+        {
+            SetShellMessage(result.Error?.Message ?? "ScreenFast could not save preferences, but recording can continue.");
+        }
+    }
+
     private void OnSnapshotChanged(object? sender, RecorderStatusSnapshot snapshot)
     {
+        var shouldReloadHistory = ShouldReloadHistory(snapshot);
         if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
         {
-            _dispatcherQueue.TryEnqueue(() => ApplySnapshot(snapshot));
+            _dispatcherQueue.TryEnqueue(async () =>
+            {
+                await ApplySnapshotAsync(snapshot);
+                if (shouldReloadHistory)
+                {
+                    await ReloadHistoryAsync();
+                }
+            });
             return;
         }
 
-        ApplySnapshot(snapshot);
+        _ = ApplySnapshotAsync(snapshot);
+        if (shouldReloadHistory)
+        {
+            _ = ReloadHistoryAsync();
+        }
     }
 
+    private bool ShouldReloadHistory(RecorderStatusSnapshot nextSnapshot)
+    {
+        return nextSnapshot.State is RecorderState.Ready or RecorderState.Error
+            && _snapshot.State is RecorderState.Stopping or RecorderState.Recording or RecorderState.Paused;
+    }
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
         if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
@@ -299,37 +467,33 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplySettings(settings);
     }
 
-    private void ApplySnapshot(RecorderStatusSnapshot snapshot)
+    private async Task ApplySnapshotAsync(RecorderStatusSnapshot snapshot)
     {
         _snapshot = snapshot;
         _includeSystemAudio = snapshot.IncludeSystemAudio;
         _includeMicrophone = snapshot.IncludeMicrophone;
         _selectedQualityPreset = FindQualityPreset(snapshot.QualityPreset);
+        _selectedPostRecordingBehavior = FindPostRecordingBehavior(snapshot.PostRecordingOpenBehavior);
 
-        RaisePropertyChanged(nameof(StatusText));
-        RaisePropertyChanged(nameof(TimerText));
-        RaisePropertyChanged(nameof(StateText));
-        RaisePropertyChanged(nameof(PauseResumeText));
-        RaisePropertyChanged(nameof(SourceSummary));
-        RaisePropertyChanged(nameof(SourceDetails));
-        RaisePropertyChanged(nameof(SourceIdText));
-        RaisePropertyChanged(nameof(OutputFolderText));
-        RaisePropertyChanged(nameof(IncludeSystemAudio));
-        RaisePropertyChanged(nameof(IncludeMicrophone));
-        RaisePropertyChanged(nameof(SelectedQualityPreset));
-        RaisePropertyChanged(nameof(CanSelectSource));
-        RaisePropertyChanged(nameof(CanPickOutputFolder));
-        RaisePropertyChanged(nameof(CanRecord));
-        RaisePropertyChanged(nameof(CanPauseResume));
-        RaisePropertyChanged(nameof(CanStop));
-        RefreshCommands();
+        if (snapshot.State == RecorderState.Recording && !_isOnboardingDismissed)
+        {
+            _isOnboardingDismissed = true;
+            await SavePreferencesAsync();
+        }
+
+        RaiseAllStateProperties();
     }
 
     private void ApplySettings(AppSettings settings)
     {
+        _includeSystemAudio = settings.IncludeSystemAudio;
+        _includeMicrophone = settings.IncludeMicrophone;
+        _selectedQualityPreset = FindQualityPreset(settings.QualityPreset);
+        _selectedPostRecordingBehavior = FindPostRecordingBehavior(settings.PostRecordingOpenBehavior);
         _launchMinimizedToTray = settings.LaunchMinimizedToTray;
         _closeToTray = settings.CloseToTray;
         _minimizeToTray = settings.MinimizeToTray;
+        _isOnboardingDismissed = settings.IsOnboardingDismissed;
         _startHotkeyModifier = FindModifier(settings.Hotkeys.StartRecording);
         _stopHotkeyModifier = FindModifier(settings.Hotkeys.StopRecording);
         _pauseHotkeyModifier = FindModifier(settings.Hotkeys.PauseResumeRecording);
@@ -337,6 +501,9 @@ public sealed class MainWindowViewModel : ObservableObject
         _stopHotkeyKey = FindHotkeyKey(settings.Hotkeys.StopRecording.VirtualKey);
         _pauseHotkeyKey = FindHotkeyKey(settings.Hotkeys.PauseResumeRecording.VirtualKey);
 
+        RaiseAllStateProperties();
+        RaisePropertyChanged(nameof(SelectedQualityPreset));
+        RaisePropertyChanged(nameof(SelectedPostRecordingBehavior));
         RaisePropertyChanged(nameof(LaunchMinimizedToTray));
         RaisePropertyChanged(nameof(CloseToTray));
         RaisePropertyChanged(nameof(MinimizeToTray));
@@ -346,6 +513,112 @@ public sealed class MainWindowViewModel : ObservableObject
         RaisePropertyChanged(nameof(StartHotkeyKey));
         RaisePropertyChanged(nameof(StopHotkeyKey));
         RaisePropertyChanged(nameof(PauseHotkeyKey));
+    }
+
+    private async Task DismissOnboardingAsync()
+    {
+        if (_isOnboardingDismissed)
+        {
+            return;
+        }
+
+        _isOnboardingDismissed = true;
+        RaisePropertyChanged(nameof(IsOnboardingVisible));
+        await SavePreferencesAsync();
+        RefreshCommands();
+    }
+
+    private async Task ShowOnboardingAgainAsync()
+    {
+        if (!_isOnboardingDismissed)
+        {
+            return;
+        }
+
+        _isOnboardingDismissed = false;
+        RaisePropertyChanged(nameof(IsOnboardingVisible));
+        await SavePreferencesAsync();
+        RefreshCommands();
+    }
+
+    private async Task OpenRecordingAsync()
+    {
+        if (SelectedRecentRecording is null)
+        {
+            return;
+        }
+
+        var result = await _fileLauncherService.OpenFileAsync(SelectedRecentRecording.FilePath);
+        if (!result.IsSuccess)
+        {
+            PublishFriendlyStatus(result.Error?.Message ?? "ScreenFast could not open that file.");
+        }
+    }
+
+    private async Task OpenContainingFolderAsync()
+    {
+        if (SelectedRecentRecording is null)
+        {
+            return;
+        }
+
+        var result = await _fileLauncherService.OpenContainingFolderAsync(SelectedRecentRecording.FilePath);
+        if (!result.IsSuccess)
+        {
+            PublishFriendlyStatus(result.Error?.Message ?? "ScreenFast could not open that folder.");
+        }
+    }
+
+    private void CopyPath()
+    {
+        if (SelectedRecentRecording is null || string.IsNullOrWhiteSpace(SelectedRecentRecording.FilePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var dataPackage = new DataTransfer.DataPackage();
+            dataPackage.SetText(SelectedRecentRecording.FilePath);
+            DataTransfer.Clipboard.SetContent(dataPackage);
+            PublishFriendlyStatus("Recording path copied to clipboard.");
+        }
+        catch
+        {
+            PublishFriendlyStatus("ScreenFast could not copy that path.");
+        }
+    }
+
+    private async Task RemoveHistoryItemAsync()
+    {
+        if (SelectedRecentRecording is null)
+        {
+            return;
+        }
+
+        await _historyService.RemoveEntryAsync(SelectedRecentRecording.Id);
+        SelectedRecentRecording = null;
+        await ReloadHistoryAsync();
+    }
+
+    private async Task ClearMissingHistoryAsync()
+    {
+        await _historyService.ClearMissingAsync();
+        SelectedRecentRecording = null;
+        await ReloadHistoryAsync();
+    }
+
+    private async Task ClearAllHistoryAsync()
+    {
+        await _historyService.ClearAsync();
+        SelectedRecentRecording = null;
+        await ReloadHistoryAsync();
+    }
+
+    private void PublishFriendlyStatus(string message)
+    {
+        SetShellMessage(message);
+        _orchestrator.PublishUserMessage(message);
     }
 
     private void ApplyShellMessage(string? message)
@@ -359,6 +632,11 @@ public sealed class MainWindowViewModel : ObservableObject
         return _qualityPresets.First(option => option.Preset == preset);
     }
 
+    private PostRecordingOpenBehaviorOption FindPostRecordingBehavior(PostRecordingOpenBehavior behavior)
+    {
+        return _postRecordingBehaviors.First(option => option.Behavior == behavior);
+    }
+
     private HotkeyModifierOption FindModifier(HotkeyGesture gesture)
     {
         return _hotkeyModifiers.FirstOrDefault(option => option.Matches(gesture)) ?? _hotkeyModifiers[0];
@@ -369,6 +647,31 @@ public sealed class MainWindowViewModel : ObservableObject
         return _hotkeyKeys.FirstOrDefault(option => option.VirtualKey == virtualKey) ?? _hotkeyKeys[0];
     }
 
+    private void RaiseAllStateProperties()
+    {
+        RaisePropertyChanged(nameof(StatusText));
+        RaisePropertyChanged(nameof(TimerText));
+        RaisePropertyChanged(nameof(StateText));
+        RaisePropertyChanged(nameof(PauseResumeText));
+        RaisePropertyChanged(nameof(SourceSummary));
+        RaisePropertyChanged(nameof(SourceDetails));
+        RaisePropertyChanged(nameof(SourceIdText));
+        RaisePropertyChanged(nameof(OutputFolderText));
+        RaisePropertyChanged(nameof(ShellMessageText));
+        RaisePropertyChanged(nameof(ReadySourceText));
+        RaisePropertyChanged(nameof(ReadyOutputFolderText));
+        RaisePropertyChanged(nameof(AudioChoicesSummary));
+        RaisePropertyChanged(nameof(IncludeSystemAudio));
+        RaisePropertyChanged(nameof(IncludeMicrophone));
+        RaisePropertyChanged(nameof(IsOnboardingVisible));
+        RaisePropertyChanged(nameof(CanSelectSource));
+        RaisePropertyChanged(nameof(CanPickOutputFolder));
+        RaisePropertyChanged(nameof(CanRecord));
+        RaisePropertyChanged(nameof(CanPauseResume));
+        RaisePropertyChanged(nameof(CanStop));
+        RefreshCommands();
+    }
+
     private void RefreshCommands()
     {
         SelectSourceCommand.NotifyCanExecuteChanged();
@@ -377,10 +680,20 @@ public sealed class MainWindowViewModel : ObservableObject
         PauseResumeCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
         ApplyHotkeysCommand.NotifyCanExecuteChanged();
+        OpenRecordingCommand.NotifyCanExecuteChanged();
+        OpenContainingFolderCommand.NotifyCanExecuteChanged();
+        CopyPathCommand.NotifyCanExecuteChanged();
+        RemoveHistoryItemCommand.NotifyCanExecuteChanged();
+        ClearMissingHistoryCommand.NotifyCanExecuteChanged();
+        ClearAllHistoryCommand.NotifyCanExecuteChanged();
+        DismissOnboardingCommand.NotifyCanExecuteChanged();
+        ShowOnboardingAgainCommand.NotifyCanExecuteChanged();
     }
 }
 
 public sealed record VideoQualityPresetOption(VideoQualityPreset Preset, string Label);
+
+public sealed record PostRecordingOpenBehaviorOption(PostRecordingOpenBehavior Behavior, string Label);
 
 public sealed record HotkeyModifierOption(string Label, bool Control, bool Shift, bool Alt)
 {
@@ -407,5 +720,7 @@ public sealed record HotkeyKeyOption(int VirtualKey, string Label)
             .Select(index => new HotkeyKeyOption(0x6F + index, $"F{index}"))
             .ToArray();
 }
+
+
 
 

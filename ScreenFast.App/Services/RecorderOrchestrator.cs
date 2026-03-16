@@ -10,21 +10,31 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
     private readonly ICaptureSourcePickerService _captureSourcePickerService;
     private readonly IOutputFolderPickerService _outputFolderPickerService;
     private readonly IRecordingEncoderService _recordingEncoderService;
+    private readonly IRecordingHistoryService _recordingHistoryService;
+    private readonly IFileLauncherService _fileLauncherService;
+    private readonly IRecordingPreflightValidator _recordingPreflightValidator;
     private readonly RecorderStateMachine _stateMachine = new();
 
     private nint _windowHandle;
     private CancellationTokenSource? _timerCancellationSource;
     private DateTimeOffset _recordingStartedAt;
     private TimeSpan _elapsedBeforePause;
+    private RecordingSessionInfo? _activeSession;
 
     public RecorderOrchestrator(
         ICaptureSourcePickerService captureSourcePickerService,
         IOutputFolderPickerService outputFolderPickerService,
-        IRecordingEncoderService recordingEncoderService)
+        IRecordingEncoderService recordingEncoderService,
+        IRecordingHistoryService recordingHistoryService,
+        IFileLauncherService fileLauncherService,
+        IRecordingPreflightValidator recordingPreflightValidator)
     {
         _captureSourcePickerService = captureSourcePickerService;
         _outputFolderPickerService = outputFolderPickerService;
         _recordingEncoderService = recordingEncoderService;
+        _recordingHistoryService = recordingHistoryService;
+        _fileLauncherService = fileLauncherService;
+        _recordingPreflightValidator = recordingPreflightValidator;
         _recordingEncoderService.RuntimeErrorOccurred += OnRecordingRuntimeErrorOccurred;
         Snapshot = RecorderStatusSnapshot.CreateDefault();
     }
@@ -50,6 +60,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             IncludeSystemAudio = settings.IncludeSystemAudio,
             IncludeMicrophone = settings.IncludeMicrophone,
             QualityPreset = settings.QualityPreset,
+            PostRecordingOpenBehavior = settings.PostRecordingOpenBehavior,
             StatusMessage = string.IsNullOrWhiteSpace(startupMessage)
                 ? nextState == RecorderState.Ready
                     ? "Ready to record."
@@ -58,18 +69,24 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         });
     }
 
-    public void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone)
+    public void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone, PostRecordingOpenBehavior postRecordingOpenBehavior)
     {
         Publish(Snapshot with
         {
             IncludeSystemAudio = includeSystemAudio,
-            IncludeMicrophone = includeMicrophone
+            IncludeMicrophone = includeMicrophone,
+            PostRecordingOpenBehavior = postRecordingOpenBehavior
         });
     }
 
     public void UpdateQualityPreset(VideoQualityPreset preset)
     {
         Publish(Snapshot with { QualityPreset = preset });
+    }
+
+    public void PublishUserMessage(string message)
+    {
+        Publish(Snapshot with { StatusMessage = message });
     }
 
     public async Task SelectSourceAsync(CancellationToken cancellationToken = default)
@@ -171,15 +188,10 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             return;
         }
 
-        if (Snapshot.SelectedSource is null)
+        var preflightResult = await _recordingPreflightValidator.ValidateAsync(Snapshot, cancellationToken);
+        if (!preflightResult.IsSuccess)
         {
-            Publish(Snapshot with { StatusMessage = "Select a source before recording." });
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(Snapshot.OutputFolder))
-        {
-            Publish(Snapshot with { StatusMessage = "Choose an output folder before recording." });
+            Publish(Snapshot with { StatusMessage = preflightResult.Error?.Message ?? "ScreenFast is not ready to record yet." });
             return;
         }
 
@@ -199,8 +211,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
 
         var result = await _recordingEncoderService.StartAsync(
             new RecordingStartRequest(
-                Snapshot.SelectedSource,
-                Snapshot.OutputFolder,
+                Snapshot.SelectedSource!,
+                Snapshot.OutputFolder!,
                 Snapshot.IncludeSystemAudio,
                 Snapshot.IncludeMicrophone,
                 Snapshot.QualityPreset),
@@ -208,13 +220,15 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
 
         if (result.IsSuccess && result.Value is not null)
         {
+            _activeSession = result.Value;
             _elapsedBeforePause = TimeSpan.Zero;
             _recordingStartedAt = DateTimeOffset.UtcNow;
             StartTimerLoop();
             var audioSummary = BuildAudioSummary(result.Value);
+            var qualitySummary = VideoQualityPresets.Get(result.Value.QualityPreset).DisplayName;
             var status = string.IsNullOrWhiteSpace(result.Value.WarningMessage)
-                ? $"Recording to {Path.GetFileName(result.Value.FilePath)} using {result.Value.QualityPreset}{audioSummary}"
-                : $"Recording to {Path.GetFileName(result.Value.FilePath)} using {result.Value.QualityPreset}{audioSummary}. {result.Value.WarningMessage}";
+                ? $"Recording to {Path.GetFileName(result.Value.FilePath)} using {qualitySummary}{audioSummary}"
+                : $"Recording to {Path.GetFileName(result.Value.FilePath)} using {qualitySummary}{audioSummary}. {result.Value.WarningMessage}";
 
             Publish(Snapshot with
             {
@@ -225,6 +239,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             return;
         }
 
+        _activeSession = null;
         ResetTimer();
         _stateMachine.TransitionTo(RecorderState.Error);
         Publish(Snapshot with
@@ -345,6 +360,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
             return;
         }
 
+        var duration = GetElapsed();
         StopTimerLoop(resetDisplay: false);
         Publish(Snapshot with
         {
@@ -357,14 +373,21 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
 
         if (!stopResult.IsSuccess || string.IsNullOrWhiteSpace(stopResult.Value))
         {
+            await TryAddHistoryEntryAsync(CreateFailedEntry(duration, stopResult.Error?.Message));
             _stateMachine.TransitionTo(RecorderState.Error);
             Publish(Snapshot with
             {
                 State = RecorderState.Error,
                 StatusMessage = stopResult.Error?.Message ?? "ScreenFast could not finalize the recording."
             });
+            _activeSession = null;
             return;
         }
+
+        var path = stopResult.Value;
+        var fileName = Path.GetFileName(path);
+
+        await TryAddHistoryEntryAsync(CreateSuccessEntry(path, fileName, duration));
 
         var nextState = Snapshot.SelectedSource is not null && !string.IsNullOrWhiteSpace(Snapshot.OutputFolder)
             ? RecorderState.Ready
@@ -374,9 +397,129 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         Publish(Snapshot with
         {
             State = nextState,
-            StatusMessage = $"Saved MP4 to {stopResult.Value}",
+            StatusMessage = $"Saved MP4 to {path}",
             TimerText = "00:00:00"
         });
+
+        _activeSession = null;
+        await TryRunPostRecordingActionAsync(path);
+    }
+
+    private async Task TryRunPostRecordingActionAsync(string filePath)
+    {
+        OperationResult result;
+        if (Snapshot.PostRecordingOpenBehavior == PostRecordingOpenBehavior.OpenFile)
+        {
+            result = await _fileLauncherService.OpenFileAsync(filePath);
+        }
+        else if (Snapshot.PostRecordingOpenBehavior == PostRecordingOpenBehavior.OpenContainingFolder)
+        {
+            result = await _fileLauncherService.OpenContainingFolderAsync(filePath);
+        }
+        else
+        {
+            return;
+        }
+
+        if (!result.IsSuccess)
+        {
+            Publish(Snapshot with
+            {
+                StatusMessage = result.Error?.Message ?? "ScreenFast could not run the post-recording action."
+            });
+        }
+    }
+
+    private RecordingHistoryEntry CreateSuccessEntry(string filePath, string fileName, TimeSpan duration)
+    {
+        long? size = null;
+        var exists = false;
+
+        try
+        {
+            var info = new FileInfo(filePath);
+            if (info.Exists)
+            {
+                exists = true;
+                size = info.Length;
+            }
+        }
+        catch
+        {
+        }
+
+        return new RecordingHistoryEntry(
+            Guid.NewGuid(),
+            filePath,
+            fileName,
+            DateTimeOffset.UtcNow,
+            duration,
+            BuildSourceSummary(),
+            Snapshot.IncludeSystemAudio,
+            Snapshot.IncludeMicrophone,
+            VideoQualityPresets.Get(Snapshot.QualityPreset).DisplayName,
+            true,
+            null,
+            size,
+            exists);
+    }
+
+    private RecordingHistoryEntry CreateFailedEntry(TimeSpan duration, string? failureSummary)
+    {
+        var maybePath = _activeSession?.FilePath ?? string.Empty;
+        var fileName = string.IsNullOrWhiteSpace(maybePath) ? "(failed recording)" : Path.GetFileName(maybePath);
+        long? size = null;
+        var exists = false;
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(maybePath))
+            {
+                var info = new FileInfo(maybePath);
+                if (info.Exists)
+                {
+                    exists = true;
+                    size = info.Length;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return new RecordingHistoryEntry(
+            Guid.NewGuid(),
+            maybePath,
+            fileName,
+            DateTimeOffset.UtcNow,
+            duration,
+            BuildSourceSummary(),
+            Snapshot.IncludeSystemAudio,
+            Snapshot.IncludeMicrophone,
+            VideoQualityPresets.Get(Snapshot.QualityPreset).DisplayName,
+            false,
+            string.IsNullOrWhiteSpace(failureSummary) ? "Recording failed." : failureSummary,
+            size,
+            exists);
+    }
+
+    private string BuildSourceSummary()
+    {
+        return Snapshot.SelectedSource is null
+            ? "No source"
+            : $"{Snapshot.SelectedSource.TypeDisplayName}: {Snapshot.SelectedSource.DisplayName}";
+    }
+
+    private async Task TryAddHistoryEntryAsync(RecordingHistoryEntry entry)
+    {
+        try
+        {
+            await _recordingHistoryService.AddEntryAsync(entry);
+        }
+        catch
+        {
+            // History is best-effort and must not break recording state.
+        }
     }
 
     private Task HandleInvalidPauseToggleAsync()
@@ -391,8 +534,32 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         return Task.CompletedTask;
     }
 
-    private void OnRecordingRuntimeErrorOccurred(object? sender, AppError error)
+    private async void OnRecordingRuntimeErrorOccurred(object? sender, AppError error)
     {
+        if (Snapshot.State is not RecorderState.Recording and not RecorderState.Paused and not RecorderState.Stopping)
+        {
+            Publish(Snapshot with
+            {
+                State = RecorderState.Error,
+                StatusMessage = error.Message,
+                TimerText = "00:00:00"
+            });
+            return;
+        }
+
+        var duration = GetElapsed();
+        StopTimerLoop(resetDisplay: false);
+
+        try
+        {
+            await _recordingEncoderService.StopAsync();
+        }
+        catch
+        {
+        }
+
+        await TryAddHistoryEntryAsync(CreateFailedEntry(duration, error.Message));
+        _activeSession = null;
         ResetTimer();
         _stateMachine.TransitionTo(RecorderState.Error);
         Publish(Snapshot with
@@ -496,3 +663,4 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         return string.Empty;
     }
 }
+

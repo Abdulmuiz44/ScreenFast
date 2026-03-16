@@ -10,6 +10,8 @@ public sealed record AppSettings(
     bool LaunchMinimizedToTray,
     bool CloseToTray,
     bool MinimizeToTray,
+    PostRecordingOpenBehavior PostRecordingOpenBehavior,
+    bool IsOnboardingDismissed,
     CaptureSourceModel? LastSelectedSource)
 {
     public static AppSettings CreateDefault() =>
@@ -23,5 +25,7 @@ public sealed record AppSettings(
             false,
             true,
             true,
+            PostRecordingOpenBehavior.None,
+            false,
             null);
 }

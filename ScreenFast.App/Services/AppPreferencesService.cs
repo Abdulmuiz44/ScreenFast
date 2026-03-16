@@ -99,6 +99,27 @@ public sealed class AppPreferencesService : IAppPreferencesService
         return await PersistAsync(CurrentSettings, cancellationToken);
     }
 
+    public async Task<OperationResult> UpdateRecorderPreferencesAsync(
+        bool includeSystemAudio,
+        bool includeMicrophone,
+        VideoQualityPreset qualityPreset,
+        PostRecordingOpenBehavior postRecordingOpenBehavior,
+        bool isOnboardingDismissed,
+        CancellationToken cancellationToken = default)
+    {
+        CurrentSettings = CurrentSettings with
+        {
+            IncludeSystemAudio = includeSystemAudio,
+            IncludeMicrophone = includeMicrophone,
+            QualityPreset = qualityPreset,
+            PostRecordingOpenBehavior = postRecordingOpenBehavior,
+            IsOnboardingDismissed = isOnboardingDismissed
+        };
+
+        SettingsChanged?.Invoke(this, CurrentSettings);
+        return await PersistAsync(CurrentSettings, cancellationToken);
+    }
+
     private void OnSnapshotChanged(object? sender, RecorderStatusSnapshot snapshot)
     {
         if (!_isInitialized)
@@ -112,6 +133,7 @@ public sealed class AppPreferencesService : IAppPreferencesService
             IncludeSystemAudio = snapshot.IncludeSystemAudio,
             IncludeMicrophone = snapshot.IncludeMicrophone,
             QualityPreset = snapshot.QualityPreset,
+            PostRecordingOpenBehavior = snapshot.PostRecordingOpenBehavior,
             LastSelectedSource = snapshot.SelectedSource
         };
 

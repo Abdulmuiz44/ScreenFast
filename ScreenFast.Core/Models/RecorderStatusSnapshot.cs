@@ -10,7 +10,8 @@ public sealed record RecorderStatusSnapshot(
     string? OutputFolder,
     bool IncludeSystemAudio,
     bool IncludeMicrophone,
-    VideoQualityPreset QualityPreset)
+    VideoQualityPreset QualityPreset,
+    PostRecordingOpenBehavior PostRecordingOpenBehavior)
 {
     public static RecorderStatusSnapshot CreateDefault() =>
         new(
@@ -21,5 +22,6 @@ public sealed record RecorderStatusSnapshot(
             null,
             false,
             false,
-            VideoQualityPreset.Standard);
+            VideoQualityPreset.Standard,
+            PostRecordingOpenBehavior.None);
 }

@@ -80,7 +80,10 @@ public sealed class JsonAppSettingsStore : IAppSettingsStore
         {
             Version = settings.Version <= 0 ? 1 : settings.Version,
             QualityPreset = Enum.IsDefined(settings.QualityPreset) ? settings.QualityPreset : VideoQualityPreset.Standard,
-            Hotkeys = settings.Hotkeys ?? HotkeySettings.CreateDefault()
+            Hotkeys = settings.Hotkeys ?? HotkeySettings.CreateDefault(),
+            PostRecordingOpenBehavior = Enum.IsDefined(settings.PostRecordingOpenBehavior)
+                ? settings.PostRecordingOpenBehavior
+                : PostRecordingOpenBehavior.None
         };
     }
 }

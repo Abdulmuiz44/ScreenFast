@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using ScreenFast.App.Interop;
-using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
 using ScreenFast.Core.Results;
 using ScreenFast.Core.State;

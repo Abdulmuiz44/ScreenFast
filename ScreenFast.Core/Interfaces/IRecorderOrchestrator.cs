@@ -12,9 +12,11 @@ public interface IRecorderOrchestrator
 
     void ApplyPersistedSettings(AppSettings settings, CaptureSourceModel? restoredSource, string? startupMessage);
 
-    void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone);
+    void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone, PostRecordingOpenBehavior postRecordingOpenBehavior);
 
     void UpdateQualityPreset(VideoQualityPreset preset);
+
+    void PublishUserMessage(string message);
 
     Task SelectSourceAsync(CancellationToken cancellationToken = default);
 

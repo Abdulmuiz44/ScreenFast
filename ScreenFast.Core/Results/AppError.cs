@@ -1,4 +1,4 @@
-﻿namespace ScreenFast.Core.Results;
+namespace ScreenFast.Core.Results;
 
 public sealed record AppError(string Code, string Message)
 {
@@ -22,4 +22,10 @@ public sealed record AppError(string Code, string Message)
 
     public static AppError AudioCaptureFailed(string message) =>
         new("audio_capture_failed", message);
+
+    public static AppError ShellActionFailed(string message) =>
+        new("shell_action_failed", message);
+
+    public static AppError PreflightFailed(string message) =>
+        new("recording_preflight_failed", message);
 }

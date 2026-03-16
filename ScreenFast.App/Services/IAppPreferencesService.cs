@@ -14,4 +14,12 @@ public interface IAppPreferencesService
     Task<OperationResult> UpdateHotkeySettingsAsync(HotkeySettings hotkeys, CancellationToken cancellationToken = default);
 
     Task<OperationResult> UpdateTrayBehaviorAsync(bool launchMinimizedToTray, bool closeToTray, bool minimizeToTray, CancellationToken cancellationToken = default);
+
+    Task<OperationResult> UpdateRecorderPreferencesAsync(
+        bool includeSystemAudio,
+        bool includeMicrophone,
+        VideoQualityPreset qualityPreset,
+        PostRecordingOpenBehavior postRecordingOpenBehavior,
+        bool isOnboardingDismissed,
+        CancellationToken cancellationToken = default);
 }

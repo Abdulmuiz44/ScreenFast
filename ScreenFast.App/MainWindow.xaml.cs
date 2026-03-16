@@ -20,10 +20,17 @@ public sealed partial class MainWindow : Window
         var windowHandle = WindowNative.GetWindowHandle(this);
         ViewModel.InitializeWindowHandle(windowHandle);
         _desktopShellService.Initialize(windowHandle);
+        Activated += OnActivated;
         Closed += OnClosed;
     }
 
     public MainWindowViewModel ViewModel { get; }
+
+    private async void OnActivated(object sender, WindowActivatedEventArgs args)
+    {
+        Activated -= OnActivated;
+        await ViewModel.InitializeAsync();
+    }
 
     private void OnShellMessageChanged(object? sender, string? message)
     {
