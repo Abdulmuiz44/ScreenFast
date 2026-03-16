@@ -19,8 +19,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICaptureSessionFactory, GraphicsCaptureSessionFactory>();
         services.AddSingleton<IOutputFolderPickerService, OutputFolderPickerService>();
         services.AddSingleton<IRecordingEncoderService, MediaFoundationRecordingEncoderService>();
-        services.AddSingleton<ISystemAudioCaptureService, NoOpSystemAudioCaptureService>();
-        services.AddSingleton<IMicrophoneCaptureService, NoOpMicrophoneCaptureService>();
+        services.AddSingleton<ISystemAudioCaptureService, WasapiLoopbackCaptureService>();
+        services.AddSingleton<IMicrophoneCaptureService, MicrophoneCaptureService>();
         services.AddSingleton<IRecorderOrchestrator, RecorderOrchestrator>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<MainWindow>();

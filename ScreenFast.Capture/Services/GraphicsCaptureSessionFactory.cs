@@ -23,6 +23,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
     public Task<OperationResult<ICaptureSession>> CreateAsync(
         CaptureSourceModel source,
         Func<CapturedFrame, OperationResult> frameProcessor,
+        Action<AppError> runtimeErrorHandler,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -36,7 +37,8 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
         var session = new CaptureSessionInstance(
             captureItemResult.Value,
             _deviceProvider.GetResources(),
-            frameProcessor);
+            frameProcessor,
+            runtimeErrorHandler);
 
         return Task.FromResult(OperationResult<ICaptureSession>.Success(session));
     }
@@ -46,29 +48,33 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
         private readonly GraphicsCaptureItem _captureItem;
         private readonly D3D11DeviceResources _deviceResources;
         private readonly Func<CapturedFrame, OperationResult> _frameProcessor;
+        private readonly Action<AppError> _runtimeErrorHandler;
 
         private Direct3D11CaptureFramePool? _framePool;
         private Windows.Graphics.Capture.GraphicsCaptureSession? _captureSession;
-        private SizeInt32 _currentSize;
+        private SizeInt32 _initialSize;
         private bool _isStarted;
         private bool _isStopping;
+        private int _faulted;
 
         public CaptureSessionInstance(
             GraphicsCaptureItem captureItem,
             D3D11DeviceResources deviceResources,
-            Func<CapturedFrame, OperationResult> frameProcessor)
+            Func<CapturedFrame, OperationResult> frameProcessor,
+            Action<AppError> runtimeErrorHandler)
         {
             _captureItem = captureItem;
             _deviceResources = deviceResources;
             _frameProcessor = frameProcessor;
-            _currentSize = captureItem.Size;
+            _runtimeErrorHandler = runtimeErrorHandler;
+            _initialSize = captureItem.Size;
         }
 
         public nint NativeDevicePointer => _deviceResources.DevicePointer;
 
-        public int Width => _currentSize.Width;
+        public int Width => _initialSize.Width;
 
-        public int Height => _currentSize.Height;
+        public int Height => _initialSize.Height;
 
         public OperationResult Start()
         {
@@ -83,7 +89,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                     _deviceResources.Direct3DDevice,
                     DirectXPixelFormat.B8G8R8A8UIntNormalized,
                     2,
-                    _currentSize);
+                    _initialSize);
 
                 _framePool.FrameArrived += OnFrameArrived;
                 _captureSession = _framePool.CreateCaptureSession(_captureItem);
@@ -119,46 +125,60 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                 return;
             }
 
-            using var frame = sender.TryGetNextFrame();
-            if (frame is null)
+            try
+            {
+                using var frame = sender.TryGetNextFrame();
+                if (frame is null)
+                {
+                    return;
+                }
+
+                if (frame.ContentSize.Width != _initialSize.Width || frame.ContentSize.Height != _initialSize.Height)
+                {
+                    ReportRuntimeError(AppError.SourceSizeChanged());
+                    return;
+                }
+
+                var access = (IDirect3DDxgiInterfaceAccess)frame.Surface;
+                var texturePointer = access.GetInterface(Direct3D11Native.Id3D11Texture2DGuid);
+
+                try
+                {
+                    var frameResult = _frameProcessor(
+                        new CapturedFrame(
+                            texturePointer,
+                            frame.SystemRelativeTime?.Ticks ?? 0,
+                            frame.ContentSize.Width,
+                            frame.ContentSize.Height));
+
+                    if (!frameResult.IsSuccess && frameResult.Error is not null)
+                    {
+                        ReportRuntimeError(frameResult.Error);
+                    }
+                }
+                finally
+                {
+                    if (texturePointer != nint.Zero)
+                    {
+                        System.Runtime.InteropServices.Marshal.Release(texturePointer);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportRuntimeError(AppError.RecordingFailed($"ScreenFast capture failed while receiving frames: {ex.Message}"));
+            }
+        }
+
+        private void ReportRuntimeError(AppError error)
+        {
+            if (Interlocked.Exchange(ref _faulted, 1) == 1)
             {
                 return;
             }
 
-            if (frame.ContentSize.Width != _currentSize.Width || frame.ContentSize.Height != _currentSize.Height)
-            {
-                _currentSize = frame.ContentSize;
-                sender.Recreate(
-                    _deviceResources.Direct3DDevice,
-                    DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                    2,
-                    _currentSize);
-            }
-
-            var access = (IDirect3DDxgiInterfaceAccess)frame.Surface;
-            var texturePointer = access.GetInterface(Direct3D11Native.Id3D11Texture2DGuid);
-
-            try
-            {
-                var frameResult = _frameProcessor(
-                    new CapturedFrame(
-                        texturePointer,
-                        frame.SystemRelativeTime?.Ticks ?? 0,
-                        frame.ContentSize.Width,
-                        frame.ContentSize.Height));
-
-                if (!frameResult.IsSuccess)
-                {
-                    _isStopping = true;
-                }
-            }
-            finally
-            {
-                if (texturePointer != nint.Zero)
-                {
-                    System.Runtime.InteropServices.Marshal.Release(texturePointer);
-                }
-            }
+            _isStopping = true;
+            _runtimeErrorHandler(error);
         }
 
         private void DisposeCore()

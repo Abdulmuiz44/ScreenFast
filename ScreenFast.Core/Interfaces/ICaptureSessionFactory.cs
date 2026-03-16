@@ -8,5 +8,6 @@ public interface ICaptureSessionFactory
     Task<OperationResult<ICaptureSession>> CreateAsync(
         CaptureSourceModel source,
         Func<CapturedFrame, OperationResult> frameProcessor,
+        Action<AppError> runtimeErrorHandler,
         CancellationToken cancellationToken = default);
 }

@@ -24,6 +24,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         _captureSourcePickerService = captureSourcePickerService;
         _outputFolderPickerService = outputFolderPickerService;
         _recordingEncoderService = recordingEncoderService;
+        _recordingEncoderService.RuntimeErrorOccurred += OnRecordingRuntimeErrorOccurred;
         Snapshot = RecorderStatusSnapshot.CreateDefault();
     }
 
@@ -182,10 +183,15 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         {
             _recordingStartedAt = DateTimeOffset.UtcNow;
             StartTimer();
+            var audioSummary = BuildAudioSummary(result.Value);
+            var status = string.IsNullOrWhiteSpace(result.Value.WarningMessage)
+                ? $"Recording to {Path.GetFileName(result.Value.FilePath)}{audioSummary}"
+                : $"Recording to {Path.GetFileName(result.Value.FilePath)}{audioSummary}. {result.Value.WarningMessage}";
+
             Publish(Snapshot with
             {
                 State = RecorderState.Recording,
-                StatusMessage = $"Recording to {Path.GetFileName(result.Value.FilePath)}"
+                StatusMessage = status
             });
             return;
         }
@@ -247,6 +253,18 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
         });
     }
 
+    private void OnRecordingRuntimeErrorOccurred(object? sender, AppError error)
+    {
+        ResetTimer();
+        _stateMachine.TransitionTo(RecorderState.Error);
+        Publish(Snapshot with
+        {
+            State = RecorderState.Error,
+            StatusMessage = error.Message,
+            TimerText = "00:00:00"
+        });
+    }
+
     private void StartTimer()
     {
         ResetTimer();
@@ -297,5 +315,25 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator
     {
         Snapshot = snapshot;
         SnapshotChanged?.Invoke(this, snapshot);
+    }
+
+    private static string BuildAudioSummary(RecordingSessionInfo sessionInfo)
+    {
+        if (sessionInfo.IncludesSystemAudio && sessionInfo.IncludesMicrophone)
+        {
+            return " with system audio and microphone";
+        }
+
+        if (sessionInfo.IncludesSystemAudio)
+        {
+            return " with system audio";
+        }
+
+        if (sessionInfo.IncludesMicrophone)
+        {
+            return " with microphone";
+        }
+
+        return string.Empty;
     }
 }
