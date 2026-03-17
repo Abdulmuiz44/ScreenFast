@@ -15,9 +15,11 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _historyPath;
+    private readonly IScreenFastLogService _logService;
 
-    public RecordingHistoryService()
+    public RecordingHistoryService(IScreenFastLogService logService)
     {
+        _logService = logService;
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ScreenFast");
         Directory.CreateDirectory(root);
         _historyPath = Path.Combine(root, "recording-history.json");
@@ -56,6 +58,15 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
             }
 
             await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, entries), cancellationToken);
+            _logService.Info(
+                "history.entry_added",
+                "ScreenFast added a recording history entry.",
+                new Dictionary<string, object?>
+                {
+                    ["fileName"] = entry.FileName,
+                    ["isSuccess"] = entry.IsSuccess,
+                    ["duration"] = entry.Duration
+                });
         }
         finally
         {
@@ -71,6 +82,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
             var store = await LoadUnsafeAsync(cancellationToken);
             var entries = store.Entries.Where(x => x.Id != entryId).ToList();
             await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, entries), cancellationToken);
+            _logService.Info("history.entry_removed", "ScreenFast removed a recording history entry.", new Dictionary<string, object?> { ["entryId"] = entryId });
         }
         finally
         {
@@ -84,6 +96,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
         try
         {
             await SaveUnsafeAsync(RecordingHistoryStoreModel.CreateEmpty(), cancellationToken);
+            _logService.Info("history.cleared", "ScreenFast cleared the recording history.");
         }
         finally
         {
@@ -99,6 +112,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
             var store = await LoadUnsafeAsync(cancellationToken);
             var filtered = store.Entries.Where(x => x.IsFileAvailable || !x.IsSuccess).ToList();
             await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, filtered), cancellationToken);
+            _logService.Info("history.missing_cleared", "ScreenFast removed missing-file history entries.");
         }
         finally
         {
@@ -119,6 +133,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
                 })
                 .ToList();
             await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, updated), cancellationToken);
+            _logService.Info("history.availability_refreshed", "ScreenFast refreshed recording history availability.");
         }
         finally
         {
@@ -139,8 +154,9 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
             var model = await JsonSerializer.DeserializeAsync<RecordingHistoryStoreModel>(stream, JsonOptions, cancellationToken);
             return model ?? RecordingHistoryStoreModel.CreateEmpty();
         }
-        catch
+        catch (Exception ex)
         {
+            _logService.Warning("history.load_failed", "ScreenFast could not read recording history and fell back to an empty list.", new Dictionary<string, object?> { ["error"] = ex.Message });
             return RecordingHistoryStoreModel.CreateEmpty();
         }
     }
@@ -148,11 +164,19 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
     private async Task SaveUnsafeAsync(RecordingHistoryStoreModel store, CancellationToken cancellationToken)
     {
         var tempPath = _historyPath + ".tmp";
-        await using (var stream = File.Create(tempPath))
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, store, JsonOptions, cancellationToken);
-        }
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, store, JsonOptions, cancellationToken);
+            }
 
-        File.Move(tempPath, _historyPath, true);
+            File.Move(tempPath, _historyPath, true);
+        }
+        catch (Exception ex)
+        {
+            _logService.Warning("history.save_failed", "ScreenFast could not persist recording history.", new Dictionary<string, object?> { ["error"] = ex.Message });
+            throw;
+        }
     }
 }

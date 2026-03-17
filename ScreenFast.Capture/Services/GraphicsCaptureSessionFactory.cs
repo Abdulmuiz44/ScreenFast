@@ -5,7 +5,6 @@ using ScreenFast.Core.Results;
 using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
-using Windows.Graphics.DirectX.Direct3D11;
 
 namespace ScreenFast.Capture.Services;
 
@@ -13,11 +12,16 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
 {
     private readonly ICaptureItemResolver _captureItemResolver;
     private readonly Direct3D11DeviceProvider _deviceProvider;
+    private readonly IScreenFastLogService _logService;
 
-    public GraphicsCaptureSessionFactory(ICaptureItemResolver captureItemResolver, Direct3D11DeviceProvider deviceProvider)
+    public GraphicsCaptureSessionFactory(
+        ICaptureItemResolver captureItemResolver,
+        Direct3D11DeviceProvider deviceProvider,
+        IScreenFastLogService logService)
     {
         _captureItemResolver = captureItemResolver;
         _deviceProvider = deviceProvider;
+        _logService = logService;
     }
 
     public Task<OperationResult<ICaptureSession>> CreateAsync(
@@ -31,14 +35,30 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
         var captureItemResult = _captureItemResolver.Resolve(source);
         if (!captureItemResult.IsSuccess || captureItemResult.Value is null)
         {
+            _logService.Warning(
+                "capture.resolve_failed",
+                captureItemResult.Error?.Message ?? "The capture source could not be resolved.",
+                new Dictionary<string, object?> { ["sourceId"] = source.SourceId, ["sourceType"] = source.Type.ToString() });
             return Task.FromResult(OperationResult<ICaptureSession>.Failure(captureItemResult.Error!));
         }
+
+        _logService.Info(
+            "capture.session_created",
+            "ScreenFast created a capture session.",
+            new Dictionary<string, object?>
+            {
+                ["sourceId"] = source.SourceId,
+                ["sourceName"] = source.DisplayName,
+                ["width"] = source.Width,
+                ["height"] = source.Height
+            });
 
         var session = new CaptureSessionInstance(
             captureItemResult.Value,
             _deviceProvider.GetResources(),
             frameProcessor,
-            runtimeErrorHandler);
+            runtimeErrorHandler,
+            _logService);
 
         return Task.FromResult(OperationResult<ICaptureSession>.Success(session));
     }
@@ -49,10 +69,11 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
         private readonly D3D11DeviceResources _deviceResources;
         private readonly Func<CapturedFrame, OperationResult> _frameProcessor;
         private readonly Action<AppError> _runtimeErrorHandler;
+        private readonly IScreenFastLogService _logService;
 
         private Direct3D11CaptureFramePool? _framePool;
         private Windows.Graphics.Capture.GraphicsCaptureSession? _captureSession;
-        private SizeInt32 _initialSize;
+        private readonly SizeInt32 _initialSize;
         private bool _isStarted;
         private bool _isStopping;
         private bool _isPaused;
@@ -62,12 +83,14 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             GraphicsCaptureItem captureItem,
             D3D11DeviceResources deviceResources,
             Func<CapturedFrame, OperationResult> frameProcessor,
-            Action<AppError> runtimeErrorHandler)
+            Action<AppError> runtimeErrorHandler,
+            IScreenFastLogService logService)
         {
             _captureItem = captureItem;
             _deviceResources = deviceResources;
             _frameProcessor = frameProcessor;
             _runtimeErrorHandler = runtimeErrorHandler;
+            _logService = logService;
             _initialSize = captureItem.Size;
         }
 
@@ -97,11 +120,16 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                 _captureSession.StartCapture();
                 _isStarted = true;
                 _isPaused = false;
+                _logService.Info(
+                    "capture.started",
+                    "ScreenFast capture started.",
+                    new Dictionary<string, object?> { ["width"] = _initialSize.Width, ["height"] = _initialSize.Height });
                 return OperationResult.Success();
             }
             catch (Exception ex)
             {
                 DisposeCore();
+                _logService.Error("capture.start_failed", "ScreenFast could not start capture.", new Dictionary<string, object?> { ["error"] = ex.Message });
                 return OperationResult.Failure(AppError.RecordingFailed($"ScreenFast could not start capture: {ex.Message}"));
             }
         }
@@ -114,6 +142,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             }
 
             _isPaused = true;
+            _logService.Info("capture.paused", "ScreenFast capture paused.");
             return OperationResult.Success();
         }
 
@@ -125,6 +154,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             }
 
             _isPaused = false;
+            _logService.Info("capture.resumed", "ScreenFast capture resumed.");
             return OperationResult.Success();
         }
 
@@ -133,6 +163,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             cancellationToken.ThrowIfCancellationRequested();
             _isStopping = true;
             DisposeCore();
+            _logService.Info("capture.stopped", "ScreenFast capture stopped.");
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -159,6 +190,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
 
                 if (frame.ContentSize.Width != _initialSize.Width || frame.ContentSize.Height != _initialSize.Height)
                 {
+                    _logService.Warning("capture.source_size_changed", "The capture source changed size during recording.");
                     ReportRuntimeError(AppError.SourceSizeChanged());
                     return;
                 }
@@ -207,6 +239,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             }
 
             _isStopping = true;
+            _logService.Warning("capture.runtime_failure", error.Message);
             _runtimeErrorHandler(error);
         }
 

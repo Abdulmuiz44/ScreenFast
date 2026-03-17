@@ -1,20 +1,32 @@
 using System.Diagnostics;
+using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Results;
 
 namespace ScreenFast.App.Services;
 
 public sealed class FileLauncherService : IFileLauncherService
 {
+    private readonly IScreenFastLogService _logService;
+
+    public FileLauncherService(IScreenFastLogService logService)
+    {
+        _logService = logService;
+    }
+
     public Task<OperationResult> OpenFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(OpenPath(filePath, filePath, "ScreenFast could not open that file."));
+        var result = OpenPath(filePath, filePath, "ScreenFast could not open that file.");
+        LogResult("shell.open_file", result, filePath);
+        return Task.FromResult(result);
     }
 
     public Task<OperationResult> OpenContainingFolderAsync(string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
-            return Task.FromResult(OperationResult.Failure(AppError.ShellActionFailed("There is no recording path to open.")));
+            var invalid = OperationResult.Failure(AppError.ShellActionFailed("There is no recording path to open."));
+            LogResult("shell.open_folder", invalid, filePath);
+            return Task.FromResult(invalid);
         }
 
         try
@@ -27,20 +39,28 @@ public sealed class FileLauncherService : IFileLauncherService
                     Arguments = $"/select,\"{filePath}\"",
                     UseShellExecute = true
                 });
-                return Task.FromResult(OperationResult.Success());
+                var success = OperationResult.Success();
+                LogResult("shell.open_folder", success, filePath);
+                return Task.FromResult(success);
             }
 
             var directoryPath = Directory.Exists(filePath) ? filePath : Path.GetDirectoryName(filePath);
             if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
             {
-                return Task.FromResult(OperationResult.Failure(AppError.ShellActionFailed("The recording folder is no longer available.")));
+                var unavailable = OperationResult.Failure(AppError.ShellActionFailed("The recording folder is no longer available."));
+                LogResult("shell.open_folder", unavailable, filePath);
+                return Task.FromResult(unavailable);
             }
 
-            return Task.FromResult(OpenPath(directoryPath, directoryPath, "ScreenFast could not open that folder."));
+            var result = OpenPath(directoryPath, directoryPath, "ScreenFast could not open that folder.");
+            LogResult("shell.open_folder", result, directoryPath);
+            return Task.FromResult(result);
         }
         catch (Exception ex)
         {
-            return Task.FromResult(OperationResult.Failure(AppError.ShellActionFailed($"ScreenFast could not open that folder: {ex.Message}")));
+            var failure = OperationResult.Failure(AppError.ShellActionFailed($"ScreenFast could not open that folder: {ex.Message}"));
+            LogResult("shell.open_folder", failure, filePath);
+            return Task.FromResult(failure);
         }
     }
 
@@ -63,6 +83,18 @@ public sealed class FileLauncherService : IFileLauncherService
         catch (Exception ex)
         {
             return OperationResult.Failure(AppError.ShellActionFailed($"{fallbackMessage} {ex.Message}"));
+        }
+    }
+
+    private void LogResult(string eventName, OperationResult result, string? path)
+    {
+        if (result.IsSuccess)
+        {
+            _logService.Info(eventName, "ScreenFast completed a shell open action.", new Dictionary<string, object?> { ["path"] = path });
+        }
+        else
+        {
+            _logService.Warning(eventName + "_failed", result.Error?.Message ?? "ScreenFast could not complete the shell open action.", new Dictionary<string, object?> { ["path"] = path });
         }
     }
 }

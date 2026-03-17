@@ -7,50 +7,67 @@ namespace ScreenFast.Infrastructure.Services;
 
 public sealed class RecordingPreflightValidator : IRecordingPreflightValidator
 {
+    private readonly IScreenFastLogService _logService;
+
+    public RecordingPreflightValidator(IScreenFastLogService logService)
+    {
+        _logService = logService;
+    }
+
     public Task<OperationResult> ValidateAsync(RecorderStatusSnapshot snapshot, CancellationToken cancellationToken = default)
     {
+        OperationResult result;
         if (snapshot.State is RecorderState.Recording or RecorderState.Stopping or RecorderState.Selecting)
         {
-            return Task.FromResult(OperationResult.Failure(AppError.PreflightFailed("ScreenFast is busy right now. Wait a moment and try recording again.")));
+            result = OperationResult.Failure(AppError.PreflightFailed("ScreenFast is busy right now. Wait a moment and try recording again."));
         }
-
-        if (snapshot.SelectedSource is null)
+        else if (snapshot.SelectedSource is null)
         {
-            return Task.FromResult(OperationResult.Failure(AppError.PreflightFailed("Select a display or window before recording.")));
+            result = OperationResult.Failure(AppError.PreflightFailed("Select a display or window before recording."));
         }
-
-        if (snapshot.SelectedSource.Width <= 0 || snapshot.SelectedSource.Height <= 0)
+        else if (snapshot.SelectedSource.Width <= 0 || snapshot.SelectedSource.Height <= 0)
         {
-            return Task.FromResult(OperationResult.Failure(AppError.PreflightFailed("The selected source dimensions are invalid. Re-select the source and try again.")));
+            result = OperationResult.Failure(AppError.PreflightFailed("The selected source dimensions are invalid. Re-select the source and try again."));
         }
-
-        if (string.IsNullOrWhiteSpace(snapshot.OutputFolder))
+        else if (string.IsNullOrWhiteSpace(snapshot.OutputFolder))
         {
-            return Task.FromResult(OperationResult.Failure(AppError.PreflightFailed("Choose an output folder before recording.")));
+            result = OperationResult.Failure(AppError.PreflightFailed("Choose an output folder before recording."));
         }
-
-        if (!Directory.Exists(snapshot.OutputFolder))
+        else if (!Directory.Exists(snapshot.OutputFolder))
         {
-            return Task.FromResult(OperationResult.Failure(AppError.PreflightFailed("The selected output folder no longer exists. Choose it again before recording.")));
+            result = OperationResult.Failure(AppError.PreflightFailed("The selected output folder no longer exists. Choose it again before recording."));
         }
-
-        try
+        else
         {
-            var probePath = Path.Combine(snapshot.OutputFolder, $".screenfast-write-test-{Guid.NewGuid():N}.tmp");
-            using (File.Create(probePath, 1, FileOptions.DeleteOnClose))
+            try
             {
-            }
+                var probePath = Path.Combine(snapshot.OutputFolder, $".screenfast-write-test-{Guid.NewGuid():N}.tmp");
+                using (File.Create(probePath, 1, FileOptions.DeleteOnClose))
+                {
+                }
 
-            if (File.Exists(probePath))
+                if (File.Exists(probePath))
+                {
+                    File.Delete(probePath);
+                }
+
+                result = OperationResult.Success();
+            }
+            catch
             {
-                File.Delete(probePath);
+                result = OperationResult.Failure(AppError.PreflightFailed("ScreenFast cannot write to the selected output folder. Pick a writable folder and try again."));
             }
+        }
 
-            return Task.FromResult(OperationResult.Success());
-        }
-        catch
+        if (result.IsSuccess)
         {
-            return Task.FromResult(OperationResult.Failure(AppError.PreflightFailed("ScreenFast cannot write to the selected output folder. Pick a writable folder and try again.")));
+            _logService.Info("preflight.passed", "Recording preflight validation succeeded.");
         }
+        else
+        {
+            _logService.Warning("preflight.failed", result.Error?.Message ?? "Recording preflight validation failed.");
+        }
+
+        return Task.FromResult(result);
     }
 }

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using ScreenFast.App.Interop;
+using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
 using ScreenFast.Core.Results;
 using ScreenFast.Core.State;
@@ -18,6 +19,7 @@ public sealed class DesktopShellService : IDesktopShellService
 
     private readonly IRecorderOrchestrator _orchestrator;
     private readonly IAppPreferencesService _preferencesService;
+    private readonly IScreenFastLogService _logService;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Forms.ContextMenuStrip _menu;
     private readonly Forms.ToolStripMenuItem _startMenuItem;
@@ -37,18 +39,19 @@ public sealed class DesktopShellService : IDesktopShellService
     private RecorderStatusSnapshot _snapshot;
     private HotkeySettings _activeHotkeys;
 
-    public DesktopShellService(IRecorderOrchestrator orchestrator, IAppPreferencesService preferencesService)
+    public DesktopShellService(IRecorderOrchestrator orchestrator, IAppPreferencesService preferencesService, IScreenFastLogService logService)
     {
         _orchestrator = orchestrator;
         _preferencesService = preferencesService;
+        _logService = logService;
         _snapshot = orchestrator.Snapshot;
         _activeHotkeys = preferencesService.CurrentSettings.Hotkeys;
         _orchestrator.SnapshotChanged += OnSnapshotChanged;
 
         _menu = new Forms.ContextMenuStrip();
-        _startMenuItem = new Forms.ToolStripMenuItem("Start Recording", null, async (_, _) => await _orchestrator.StartRecordingAsync());
-        _pauseResumeMenuItem = new Forms.ToolStripMenuItem("Pause Recording", null, async (_, _) => await _orchestrator.TogglePauseResumeAsync());
-        _stopMenuItem = new Forms.ToolStripMenuItem("Stop Recording", null, async (_, _) => await _orchestrator.StopRecordingAsync());
+        _startMenuItem = new Forms.ToolStripMenuItem("Start Recording", null, async (_, _) => await RunTrayActionAsync("tray.start", _orchestrator.StartRecordingAsync));
+        _pauseResumeMenuItem = new Forms.ToolStripMenuItem("Pause Recording", null, async (_, _) => await RunTrayActionAsync("tray.pause_resume", _orchestrator.TogglePauseResumeAsync));
+        _stopMenuItem = new Forms.ToolStripMenuItem("Stop Recording", null, async (_, _) => await RunTrayActionAsync("tray.stop", _orchestrator.StopRecordingAsync));
         _openMenuItem = new Forms.ToolStripMenuItem("Open ScreenFast", null, (_, _) => ShowWindow());
         _exitMenuItem = new Forms.ToolStripMenuItem("Exit", null, async (_, _) => await ExitAsync());
 
@@ -88,6 +91,7 @@ public sealed class DesktopShellService : IDesktopShellService
         NativeMethods.SetWindowLongPtr(windowHandle, NativeMethods.GwlpWndProc, functionPointer);
         _notifyIcon.Visible = true;
         _isInitialized = true;
+        _logService.Info("shell.tray_initialized", "ScreenFast initialized tray integration.");
 
         var registrationResult = RegisterHotkeys(_activeHotkeys, _activeHotkeys);
         if (!registrationResult.IsSuccess)
@@ -103,6 +107,7 @@ public sealed class DesktopShellService : IDesktopShellService
         if (_preferencesService.CurrentSettings.LaunchMinimizedToTray)
         {
             HideWindow("ScreenFast started in the tray.");
+            _logService.Info("shell.launch_minimized", "ScreenFast launched minimized to the tray.");
         }
     }
 
@@ -111,6 +116,7 @@ public sealed class DesktopShellService : IDesktopShellService
         var validation = ValidateHotkeys(hotkeys);
         if (!validation.IsSuccess)
         {
+            _logService.Warning("hotkeys.validation_failed", validation.Error?.Message ?? "Hotkey validation failed.");
             return validation;
         }
 
@@ -124,6 +130,7 @@ public sealed class DesktopShellService : IDesktopShellService
         }
 
         _activeHotkeys = hotkeys;
+        _logService.Info("hotkeys.updated", "ScreenFast updated global hotkeys.");
         return await _preferencesService.UpdateHotkeySettingsAsync(hotkeys, cancellationToken);
     }
 
@@ -187,6 +194,7 @@ public sealed class DesktopShellService : IDesktopShellService
                 if (_preferencesService.CurrentSettings.MinimizeToTray)
                 {
                     HideWindow("ScreenFast minimized to the tray.");
+                    _logService.Info("shell.minimized_to_tray", "ScreenFast minimized to the tray.");
                     return 0;
                 }
 
@@ -198,6 +206,7 @@ public sealed class DesktopShellService : IDesktopShellService
                         ? "ScreenFast is still recording in the tray."
                         : "ScreenFast is still running in the tray.";
                     HideWindow(statusMessage);
+                    _logService.Info("shell.close_to_tray", "ScreenFast sent the window to the tray instead of closing.");
                     return 0;
                 }
 
@@ -212,6 +221,7 @@ public sealed class DesktopShellService : IDesktopShellService
     {
         try
         {
+            _logService.Info("hotkeys.invoked", "A ScreenFast global hotkey was invoked.", new Dictionary<string, object?> { ["hotkeyId"] = hotkeyId });
             switch (hotkeyId)
             {
                 case StartHotkeyId:
@@ -227,6 +237,7 @@ public sealed class DesktopShellService : IDesktopShellService
         }
         catch (Exception ex)
         {
+            _logService.Warning("hotkeys.invoke_failed", "ScreenFast could not process the hotkey command.", new Dictionary<string, object?> { ["error"] = ex.Message });
             MessageChanged?.Invoke(this, $"ScreenFast could not process the hotkey command: {ex.Message}");
         }
     }
@@ -251,6 +262,7 @@ public sealed class DesktopShellService : IDesktopShellService
 
         NativeMethods.ShowWindow(_windowHandle, NativeMethods.SwRestore);
         NativeMethods.SetForegroundWindow(_windowHandle);
+        _logService.Info("tray.open_window", "ScreenFast restored the main window from the tray.");
     }
 
     private async Task ExitAsync()
@@ -267,18 +279,27 @@ public sealed class DesktopShellService : IDesktopShellService
             if (_snapshot.State is RecorderState.Recording or RecorderState.Paused)
             {
                 MessageChanged?.Invoke(this, "Stopping the active recording before ScreenFast exits.");
+                _logService.Info("shell.exit_while_recording", "ScreenFast is stopping the active recording before exiting.");
                 await _orchestrator.StopRecordingAsync();
             }
 
             _allowClose = true;
+            _logService.Info("shell.exit", "ScreenFast is exiting from the tray.");
             Application.Current.Exit();
         }
         catch (Exception ex)
         {
             _allowClose = false;
             _isExitInProgress = false;
+            _logService.Warning("shell.exit_failed", "ScreenFast could not exit cleanly.", new Dictionary<string, object?> { ["error"] = ex.Message });
             MessageChanged?.Invoke(this, $"ScreenFast could not exit cleanly: {ex.Message}");
         }
+    }
+
+    private async Task RunTrayActionAsync(string eventName, Func<CancellationToken, Task> action)
+    {
+        _logService.Info(eventName, "ScreenFast invoked a tray menu command.");
+        await action(CancellationToken.None);
     }
 
     private OperationResult RegisterHotkeys(HotkeySettings requestedHotkeys, HotkeySettings fallbackHotkeys)
@@ -307,13 +328,15 @@ public sealed class DesktopShellService : IDesktopShellService
                     RegisterHotkeys(fallbackHotkeys, fallbackHotkeys);
                 }
 
-                return OperationResult.Failure(
-                    AppError.InvalidState($"The hotkey {item.Gesture.DisplayText} is already in use by another app. ScreenFast kept the previous shortcuts."));
+                var error = AppError.InvalidState($"The hotkey {item.Gesture.DisplayText} is already in use by another app. ScreenFast kept the previous shortcuts.");
+                _logService.Warning("hotkeys.registration_failed", error.Message, new Dictionary<string, object?> { ["hotkey"] = item.Gesture.DisplayText });
+                return OperationResult.Failure(error);
             }
 
             registered.Add(item.Id);
         }
 
+        _logService.Info("hotkeys.registered", "ScreenFast registered global hotkeys successfully.");
         return OperationResult.Success();
     }
 

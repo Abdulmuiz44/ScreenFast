@@ -1,4 +1,3 @@
-
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -16,6 +15,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     private readonly ICaptureSessionFactory _captureSessionFactory;
     private readonly ISystemAudioCaptureService _systemAudioCaptureService;
     private readonly IMicrophoneCaptureService _microphoneCaptureService;
+    private readonly IScreenFastLogService _logService;
     private readonly object _sync = new();
     private readonly MediaFoundationLifetime _lifetime = new();
 
@@ -35,17 +35,31 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     public MediaFoundationRecordingEncoderService(
         ICaptureSessionFactory captureSessionFactory,
         ISystemAudioCaptureService systemAudioCaptureService,
-        IMicrophoneCaptureService microphoneCaptureService)
+        IMicrophoneCaptureService microphoneCaptureService,
+        IScreenFastLogService logService)
     {
         _captureSessionFactory = captureSessionFactory;
         _systemAudioCaptureService = systemAudioCaptureService;
         _microphoneCaptureService = microphoneCaptureService;
+        _logService = logService;
     }
 
     public event EventHandler<AppError>? RuntimeErrorOccurred;
 
     public async Task<OperationResult<RecordingSessionInfo>> StartAsync(RecordingStartRequest request, CancellationToken cancellationToken = default)
     {
+        _logService.Info(
+            "encoder.start_requested",
+            "ScreenFast encoder start was requested.",
+            new Dictionary<string, object?>
+            {
+                ["outputFolder"] = request.OutputFolder,
+                ["qualityPreset"] = request.QualityPreset,
+                ["includeSystemAudio"] = request.IncludeSystemAudio,
+                ["includeMicrophone"] = request.IncludeMicrophone,
+                ["sourceSummary"] = request.Source.DisplayName
+            });
+
         if (_isRecording)
         {
             return OperationResult<RecordingSessionInfo>.Failure(AppError.InvalidState("Recording is already in progress."));
@@ -66,6 +80,9 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         var captureSessionResult = await _captureSessionFactory.CreateAsync(request.Source, ProcessVideoFrame, HandleRuntimeFailure, cancellationToken);
         if (!captureSessionResult.IsSuccess || captureSessionResult.Value is null)
         {
+            _logService.Warning(
+                "encoder.capture_session_failed",
+                captureSessionResult.Error?.Message ?? "Capture session creation failed.");
             return OperationResult<RecordingSessionInfo>.Failure(captureSessionResult.Error!);
         }
 
@@ -91,6 +108,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 {
                     includeSystemAudio = false;
                     warnings.Add(systemAudioResult.Error?.Message ?? "System audio was requested but could not be started.");
+                    _logService.Warning("encoder.system_audio_unavailable", warnings[^1]);
                 }
             }
 
@@ -105,6 +123,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 {
                     includeMicrophone = false;
                     warnings.Add(microphoneResult.Error?.Message ?? "Microphone was requested but could not be started.");
+                    _logService.Warning("encoder.microphone_unavailable", warnings[^1]);
                 }
             }
 
@@ -132,6 +151,19 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             }
 
             _isRecording = true;
+            _logService.Info(
+                "encoder.started",
+                "ScreenFast encoder started successfully.",
+                new Dictionary<string, object?>
+                {
+                    ["outputPath"] = _outputPath,
+                    ["width"] = _captureSession.Width,
+                    ["height"] = _captureSession.Height,
+                    ["includeSystemAudio"] = includeSystemAudio,
+                    ["includeMicrophone"] = includeMicrophone,
+                    ["qualityPreset"] = request.QualityPreset
+                });
+
             return OperationResult<RecordingSessionInfo>.Success(
                 new RecordingSessionInfo(
                     _outputPath,
@@ -145,6 +177,14 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         }
         catch (Exception ex)
         {
+            _logService.Error(
+                "encoder.start_failed",
+                "ScreenFast could not initialize recording.",
+                new Dictionary<string, object?>
+                {
+                    ["outputPath"] = _outputPath,
+                    ["error"] = ex.Message
+                });
             await CleanupAsync(false, CancellationToken.None);
             return OperationResult<RecordingSessionInfo>.Failure(
                 AppError.RecordingFailed($"ScreenFast could not initialize recording: {ex.Message}"));
@@ -190,6 +230,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             _audioMixer?.Pause();
         }
 
+        _logService.Info("encoder.paused", "ScreenFast encoder paused.");
         return Task.FromResult(OperationResult.Success());
     }
 
@@ -238,25 +279,49 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             _audioMixer?.Resume();
         }
 
+        _logService.Info("encoder.resumed", "ScreenFast encoder resumed.");
         return Task.FromResult(OperationResult.Success());
     }
 
     public async Task<OperationResult<string>> StopAsync(CancellationToken cancellationToken = default)
     {
+        _logService.Info("encoder.stop_requested", "ScreenFast encoder stop was requested.");
+
         if ((!_isRecording && _backgroundFailure is null) || _writer is null || string.IsNullOrWhiteSpace(_outputPath))
         {
             return OperationResult<string>.Failure(AppError.InvalidState("There is no active recording to stop."));
         }
 
+        var outputPath = _outputPath;
+
         try
         {
             await CleanupAsync(true, cancellationToken);
-            return _backgroundFailure is not null
-                ? OperationResult<string>.Failure(_backgroundFailure)
-                : OperationResult<string>.Success(_outputPath);
+            if (_backgroundFailure is not null)
+            {
+                _logService.Warning(
+                    "encoder.stop_completed_with_failure",
+                    _backgroundFailure.Message,
+                    new Dictionary<string, object?> { ["outputPath"] = outputPath });
+                return OperationResult<string>.Failure(_backgroundFailure);
+            }
+
+            _logService.Info(
+                "encoder.stopped",
+                "ScreenFast encoder stopped cleanly.",
+                new Dictionary<string, object?> { ["outputPath"] = outputPath });
+            return OperationResult<string>.Success(outputPath);
         }
         catch (Exception ex)
         {
+            _logService.Error(
+                "encoder.stop_failed",
+                "ScreenFast could not finalize the MP4 file.",
+                new Dictionary<string, object?>
+                {
+                    ["outputPath"] = outputPath,
+                    ["error"] = ex.Message
+                });
             return OperationResult<string>.Failure(AppError.RecordingFailed($"ScreenFast could not finalize the MP4 file: {ex.Message}"));
         }
         finally
@@ -343,6 +408,15 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             return;
         }
 
+        _logService.Warning(
+            "encoder.runtime_failure",
+            error.Message,
+            new Dictionary<string, object?>
+            {
+                ["outputPath"] = _outputPath,
+                ["isPaused"] = _isPaused
+            });
+
         RuntimeErrorOccurred?.Invoke(this, error);
         _ = Task.Run(() => CleanupAsync(true, CancellationToken.None));
     }
@@ -389,6 +463,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 catch (Exception ex)
                 {
                     _backgroundFailure ??= AppError.RecordingFailed($"ScreenFast could not finalize the MP4 file: {ex.Message}");
+                    _logService.Warning("encoder.finalize_failed", ex.Message);
                 }
             }
 
@@ -668,7 +743,6 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                         0,
                         false,
                         out var mediaBuffer));
-
                 try
                 {
                     MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFCreateSample(out var sample));
@@ -846,13 +920,5 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             MediaFoundationNative.ThrowIfFailed(mediaType.SetUINT32(MediaFoundationNative.MFMtAudioAvgBytesPerSecond, 192_000));
             return mediaType;
         }
-
-        private static uint CalculateBitrate(int width, int height, int frameRate)
-        {
-            var pixelsPerSecond = width * height * frameRate;
-            return (uint)Math.Clamp(pixelsPerSecond / 4, 4_000_000, 20_000_000);
-        }
     }
 }
-
-

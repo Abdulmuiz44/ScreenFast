@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddScreenFast(this IServiceCollection services)
     {
+        services.AddSingleton<IScreenFastLogService, FileScreenFastLogService>();
         services.AddSingleton<Direct3D11DeviceProvider>();
         services.AddSingleton<GraphicsCaptureSourceResolver>();
         services.AddSingleton<ICaptureSourcePickerService, WindowsGraphicsCaptureSourcePickerService>();
@@ -20,6 +21,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICaptureSessionFactory, GraphicsCaptureSessionFactory>();
         services.AddSingleton<IOutputFolderPickerService, OutputFolderPickerService>();
         services.AddSingleton<IAppSettingsStore, JsonAppSettingsStore>();
+        services.AddSingleton<IRecoveryStateStore, JsonRecoveryStateStore>();
+        services.AddSingleton<IRecoveryService, RecoveryService>();
         services.AddSingleton<IRecordingHistoryService, RecordingHistoryService>();
         services.AddSingleton<IRecordingPreflightValidator, RecordingPreflightValidator>();
         services.AddSingleton<IRecordingEncoderService, MediaFoundationRecordingEncoderService>();
@@ -29,6 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAppPreferencesService, AppPreferencesService>();
         services.AddSingleton<IFileLauncherService, FileLauncherService>();
         services.AddSingleton<IDesktopShellService, DesktopShellService>();
+        services.AddSingleton<IDiagnosticsExportService, DiagnosticsExportService>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<MainWindow>();
 

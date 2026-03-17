@@ -12,6 +12,7 @@ public sealed record AppSettings(
     bool MinimizeToTray,
     PostRecordingOpenBehavior PostRecordingOpenBehavior,
     bool IsOnboardingDismissed,
+    string? DismissedRecoverySessionId,
     CaptureSourceModel? LastSelectedSource)
 {
     public static AppSettings CreateDefault() =>
@@ -27,5 +28,6 @@ public sealed record AppSettings(
             true,
             PostRecordingOpenBehavior.None,
             false,
+            null,
             null);
 }

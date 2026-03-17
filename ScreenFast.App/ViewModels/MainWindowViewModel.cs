@@ -17,6 +17,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly IFileLauncherService _fileLauncherService;
     private readonly IDesktopShellService _desktopShellService;
     private readonly IAppPreferencesService _preferencesService;
+    private readonly IRecoveryService _recoveryService;
+    private readonly IDiagnosticsExportService _diagnosticsExportService;
     private readonly DispatcherQueue? _dispatcherQueue;
     private readonly IReadOnlyList<VideoQualityPresetOption> _qualityPresets;
     private readonly IReadOnlyList<PostRecordingOpenBehaviorOption> _postRecordingBehaviors;
@@ -40,24 +42,28 @@ public sealed class MainWindowViewModel : ObservableObject
     private HotkeyKeyOption? _pauseHotkeyKey;
     private RecordingHistoryItemViewModel? _selectedRecentRecording;
     private bool _isOnboardingDismissed;
+    private RecoveryNoticeModel? _recoveryNotice;
+    private nint _windowHandle;
 
     public MainWindowViewModel(
         IRecorderOrchestrator orchestrator,
         IRecordingHistoryService historyService,
         IFileLauncherService fileLauncherService,
         IDesktopShellService desktopShellService,
-        IAppPreferencesService preferencesService)
+        IAppPreferencesService preferencesService,
+        IRecoveryService recoveryService,
+        IDiagnosticsExportService diagnosticsExportService)
     {
         _orchestrator = orchestrator;
         _historyService = historyService;
         _fileLauncherService = fileLauncherService;
         _desktopShellService = desktopShellService;
         _preferencesService = preferencesService;
+        _recoveryService = recoveryService;
+        _diagnosticsExportService = diagnosticsExportService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _snapshot = orchestrator.Snapshot;
-        _qualityPresets = VideoQualityPresets.All
-            .Select(definition => new VideoQualityPresetOption(definition.Preset, definition.DisplayName))
-            .ToArray();
+        _qualityPresets = VideoQualityPresets.All.Select(definition => new VideoQualityPresetOption(definition.Preset, definition.DisplayName)).ToArray();
         _postRecordingBehaviors =
         [
             new(PostRecordingOpenBehavior.None, "Do Nothing"),
@@ -73,6 +79,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _includeMicrophone = _snapshot.IncludeMicrophone;
         _selectedQualityPreset = FindQualityPreset(_snapshot.QualityPreset);
         _selectedPostRecordingBehavior = FindPostRecordingBehavior(_snapshot.PostRecordingOpenBehavior);
+        UpdateRecoveryNotice(_recoveryService.CurrentInterruptedSession);
 
         SelectSourceCommand = new AsyncRelayCommand(() => _orchestrator.SelectSourceAsync(), () => CanSelectSource);
         PickOutputFolderCommand = new AsyncRelayCommand(() => _orchestrator.ChooseOutputFolderAsync(), () => CanPickOutputFolder);
@@ -88,9 +95,15 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearAllHistoryCommand = new AsyncRelayCommand(ClearAllHistoryAsync, () => RecentRecordings.Count > 0);
         DismissOnboardingCommand = new AsyncRelayCommand(DismissOnboardingAsync, () => IsOnboardingVisible);
         ShowOnboardingAgainCommand = new AsyncRelayCommand(ShowOnboardingAgainAsync, () => !IsOnboardingVisible);
+        DismissRecoveryNoticeCommand = new AsyncRelayCommand(DismissRecoveryNoticeAsync, () => IsRecoveryNoticeVisible);
+        OpenRecoveryFolderCommand = new AsyncRelayCommand(OpenRecoveryFolderAsync, () => CanOpenRecoveryFolder);
+        CopyRecoveryPathCommand = new RelayCommand(CopyRecoveryPath, () => CanCopyRecoveryPath);
+        ClearRecoveryStateCommand = new AsyncRelayCommand(ClearRecoveryStateAsync, () => IsRecoveryNoticeVisible);
+        ExportDiagnosticsCommand = new AsyncRelayCommand(ExportDiagnosticsAsync, () => _windowHandle != nint.Zero);
 
         _orchestrator.SnapshotChanged += OnSnapshotChanged;
         _preferencesService.SettingsChanged += OnSettingsChanged;
+        _recoveryService.RecoveryStateChanged += OnRecoveryStateChanged;
     }
 
     public AsyncRelayCommand SelectSourceCommand { get; }
@@ -107,15 +120,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncRelayCommand ClearAllHistoryCommand { get; }
     public AsyncRelayCommand DismissOnboardingCommand { get; }
     public AsyncRelayCommand ShowOnboardingAgainCommand { get; }
+    public AsyncRelayCommand DismissRecoveryNoticeCommand { get; }
+    public AsyncRelayCommand OpenRecoveryFolderCommand { get; }
+    public RelayCommand CopyRecoveryPathCommand { get; }
+    public AsyncRelayCommand ClearRecoveryStateCommand { get; }
+    public AsyncRelayCommand ExportDiagnosticsCommand { get; }
 
     public ObservableCollection<RecordingHistoryItemViewModel> RecentRecordings { get; }
-
     public IReadOnlyList<VideoQualityPresetOption> QualityPresets => _qualityPresets;
-
     public IReadOnlyList<PostRecordingOpenBehaviorOption> PostRecordingBehaviors => _postRecordingBehaviors;
-
     public IReadOnlyList<HotkeyModifierOption> HotkeyModifiers => _hotkeyModifiers;
-
     public IReadOnlyList<HotkeyKeyOption> HotkeyKeys => _hotkeyKeys;
 
     public RecordingHistoryItemViewModel? SelectedRecentRecording
@@ -131,47 +145,43 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public string StatusText => _snapshot.StatusMessage;
-
     public string TimerText => _snapshot.TimerText;
-
     public string StateText => _snapshot.State.ToString();
-
     public string PauseResumeText => _snapshot.State == RecorderState.Paused ? "Resume" : "Pause";
-
-    public string SourceSummary => _snapshot.SelectedSource is null
-        ? "No source selected"
-        : $"{_snapshot.SelectedSource.TypeDisplayName}: {_snapshot.SelectedSource.DisplayName}";
-
-    public string SourceDetails => _snapshot.SelectedSource is null
-        ? "Pick a display or app window."
-        : _snapshot.SelectedSource.DimensionsText;
-
-    public string SourceIdText => _snapshot.SelectedSource is null
-        ? string.Empty
-        : $"Source ID: {_snapshot.SelectedSource.SourceId}";
-
-    public string OutputFolderText => string.IsNullOrWhiteSpace(_snapshot.OutputFolder)
-        ? "Output folder not selected"
-        : _snapshot.OutputFolder;
-
+    public string SourceSummary => _snapshot.SelectedSource is null ? "No source selected" : $"{_snapshot.SelectedSource.TypeDisplayName}: {_snapshot.SelectedSource.DisplayName}";
+    public string SourceDetails => _snapshot.SelectedSource is null ? "Pick a display or app window." : _snapshot.SelectedSource.DimensionsText;
+    public string SourceIdText => _snapshot.SelectedSource is null ? string.Empty : $"Source ID: {_snapshot.SelectedSource.SourceId}";
+    public string OutputFolderText => string.IsNullOrWhiteSpace(_snapshot.OutputFolder) ? "Output folder not selected" : _snapshot.OutputFolder;
     public string ShellMessageText => _shellMessage ?? string.Empty;
-
     public bool IsOnboardingVisible => !_isOnboardingDismissed;
-
     public string ReadySourceText => IsSourceReady ? "Source selected" : "Source missing";
-
-    public string ReadyOutputFolderText
+    public string ReadyOutputFolderText => string.IsNullOrWhiteSpace(_snapshot.OutputFolder)
+        ? "Output folder missing"
+        : (Directory.Exists(_snapshot.OutputFolder) ? "Output folder available" : "Output folder unavailable");
+    public bool IsRecoveryNoticeVisible => _recoveryNotice is not null;
+    public bool CanOpenRecoveryFolder => !string.IsNullOrWhiteSpace(_recoveryNotice?.TargetFilePath);
+    public bool CanCopyRecoveryPath => !string.IsNullOrWhiteSpace(_recoveryNotice?.TargetFilePath);
+    public string RecoveryNoticeText
     {
         get
         {
-            if (string.IsNullOrWhiteSpace(_snapshot.OutputFolder))
+            if (_recoveryNotice is null)
             {
-                return "Output folder missing";
+                return string.Empty;
             }
 
-            return Directory.Exists(_snapshot.OutputFolder)
-                ? "Output folder available"
-                : "Output folder unavailable";
+            var parts = new List<string>
+            {
+                $"Started: {_recoveryNotice.StartedAtText}",
+                $"Source: {_recoveryNotice.SourceSummary}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(_recoveryNotice.TargetFilePath))
+            {
+                parts.Add($"Expected output: {_recoveryNotice.TargetFilePath}");
+            }
+
+            return string.Join("  |  ", parts);
         }
     }
 
@@ -180,16 +190,8 @@ public sealed class MainWindowViewModel : ObservableObject
         get
         {
             var parts = new List<string>();
-            if (_includeSystemAudio)
-            {
-                parts.Add("System audio");
-            }
-
-            if (_includeMicrophone)
-            {
-                parts.Add("Microphone");
-            }
-
+            if (_includeSystemAudio) parts.Add("System audio");
+            if (_includeMicrophone) parts.Add("Microphone");
             return parts.Count == 0 ? "Audio: none" : $"Audio: {string.Join(" + ", parts)}";
         }
     }
@@ -327,18 +329,19 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public bool CanSelectSource => _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
-
     public bool CanPickOutputFolder => _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
-
     public bool CanRecord => _snapshot.State == RecorderState.Ready && IsSourceReady && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
-
     public bool CanPauseResume => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
-
     public bool CanStop => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
 
     private bool IsSourceReady => _snapshot.SelectedSource is not null && _snapshot.SelectedSource.Width > 0 && _snapshot.SelectedSource.Height > 0;
 
-    public void InitializeWindowHandle(nint windowHandle) => _orchestrator.SetWindowHandle(windowHandle);
+    public void InitializeWindowHandle(nint windowHandle)
+    {
+        _windowHandle = windowHandle;
+        _orchestrator.SetWindowHandle(windowHandle);
+        ExportDiagnosticsCommand.NotifyCanExecuteChanged();
+    }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -348,6 +351,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         await _historyService.RefreshAvailabilityAsync(cancellationToken);
         await ReloadHistoryAsync(cancellationToken);
+        UpdateRecoveryNotice(_recoveryService.CurrentInterruptedSession);
     }
 
     public void SetShellMessage(string? message)
@@ -456,6 +460,7 @@ public sealed class MainWindowViewModel : ObservableObject
         return nextSnapshot.State is RecorderState.Ready or RecorderState.Error
             && _snapshot.State is RecorderState.Stopping or RecorderState.Recording or RecorderState.Paused;
     }
+
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
         if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
@@ -465,6 +470,17 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         ApplySettings(settings);
+    }
+
+    private void OnRecoveryStateChanged(object? sender, RecoverySessionMarker? marker)
+    {
+        if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(() => UpdateRecoveryNotice(marker));
+            return;
+        }
+
+        UpdateRecoveryNotice(marker);
     }
 
     private async Task ApplySnapshotAsync(RecorderStatusSnapshot snapshot)
@@ -501,6 +517,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _stopHotkeyKey = FindHotkeyKey(settings.Hotkeys.StopRecording.VirtualKey);
         _pauseHotkeyKey = FindHotkeyKey(settings.Hotkeys.PauseResumeRecording.VirtualKey);
 
+        UpdateRecoveryNotice(_recoveryService.CurrentInterruptedSession);
         RaiseAllStateProperties();
         RaisePropertyChanged(nameof(SelectedQualityPreset));
         RaisePropertyChanged(nameof(SelectedPostRecordingBehavior));
@@ -513,6 +530,21 @@ public sealed class MainWindowViewModel : ObservableObject
         RaisePropertyChanged(nameof(StartHotkeyKey));
         RaisePropertyChanged(nameof(StopHotkeyKey));
         RaisePropertyChanged(nameof(PauseHotkeyKey));
+    }
+
+    private void UpdateRecoveryNotice(RecoverySessionMarker? marker)
+    {
+        var dismissedSessionId = _preferencesService.CurrentSettings.DismissedRecoverySessionId;
+        if (marker is null || string.Equals(dismissedSessionId, marker.SessionId, StringComparison.Ordinal))
+        {
+            _recoveryNotice = null;
+        }
+        else
+        {
+            _recoveryNotice = new RecoveryNoticeModel(marker.SessionId, marker.StartedAtUtc, marker.SourceSummary, marker.TargetFilePath);
+        }
+
+        RaiseRecoveryProperties();
     }
 
     private async Task DismissOnboardingAsync()
@@ -539,6 +571,89 @@ public sealed class MainWindowViewModel : ObservableObject
         RaisePropertyChanged(nameof(IsOnboardingVisible));
         await SavePreferencesAsync();
         RefreshCommands();
+    }
+
+    private async Task DismissRecoveryNoticeAsync()
+    {
+        if (_recoveryNotice is null)
+        {
+            return;
+        }
+
+        var result = await _preferencesService.UpdateDismissedRecoverySessionAsync(_recoveryNotice.SessionId);
+        if (!result.IsSuccess)
+        {
+            PublishFriendlyStatus(result.Error?.Message ?? "ScreenFast could not dismiss the recovery notice.");
+            return;
+        }
+
+        UpdateRecoveryNotice(_recoveryService.CurrentInterruptedSession);
+    }
+
+    private async Task OpenRecoveryFolderAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_recoveryNotice?.TargetFilePath))
+        {
+            return;
+        }
+
+        var result = await _fileLauncherService.OpenContainingFolderAsync(_recoveryNotice.TargetFilePath);
+        if (!result.IsSuccess)
+        {
+            PublishFriendlyStatus(result.Error?.Message ?? "ScreenFast could not open the recovery folder.");
+        }
+    }
+
+    private void CopyRecoveryPath()
+    {
+        if (string.IsNullOrWhiteSpace(_recoveryNotice?.TargetFilePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var dataPackage = new DataTransfer.DataPackage();
+            dataPackage.SetText(_recoveryNotice.TargetFilePath);
+            DataTransfer.Clipboard.SetContent(dataPackage);
+            PublishFriendlyStatus("Recovery path copied to clipboard.");
+        }
+        catch
+        {
+            PublishFriendlyStatus("ScreenFast could not copy the recovery path.");
+        }
+    }
+
+    private async Task ClearRecoveryStateAsync()
+    {
+        await _recoveryService.ClearActiveSessionAsync();
+        await _preferencesService.UpdateDismissedRecoverySessionAsync(null);
+        UpdateRecoveryNotice(null);
+        PublishFriendlyStatus("Recovery notice cleared.");
+    }
+
+    private async Task ExportDiagnosticsAsync()
+    {
+        if (_windowHandle == nint.Zero)
+        {
+            PublishFriendlyStatus("ScreenFast is not ready to export diagnostics yet.");
+            return;
+        }
+
+        var result = await _diagnosticsExportService.ExportAsync(_windowHandle, _preferencesService.CurrentSettings, _orchestrator.Snapshot);
+        if (!result.IsSuccess)
+        {
+            PublishFriendlyStatus(result.Error?.Message ?? "ScreenFast could not export diagnostics.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(result.Value))
+        {
+            PublishFriendlyStatus("Diagnostics export cancelled.");
+            return;
+        }
+
+        PublishFriendlyStatus($"Diagnostics exported: {result.Value}");
     }
 
     private async Task OpenRecordingAsync()
@@ -647,6 +762,15 @@ public sealed class MainWindowViewModel : ObservableObject
         return _hotkeyKeys.FirstOrDefault(option => option.VirtualKey == virtualKey) ?? _hotkeyKeys[0];
     }
 
+    private void RaiseRecoveryProperties()
+    {
+        RaisePropertyChanged(nameof(IsRecoveryNoticeVisible));
+        RaisePropertyChanged(nameof(RecoveryNoticeText));
+        RaisePropertyChanged(nameof(CanOpenRecoveryFolder));
+        RaisePropertyChanged(nameof(CanCopyRecoveryPath));
+        RefreshCommands();
+    }
+
     private void RaiseAllStateProperties()
     {
         RaisePropertyChanged(nameof(StatusText));
@@ -669,6 +793,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RaisePropertyChanged(nameof(CanRecord));
         RaisePropertyChanged(nameof(CanPauseResume));
         RaisePropertyChanged(nameof(CanStop));
+        RaiseRecoveryProperties();
         RefreshCommands();
     }
 
@@ -688,6 +813,11 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearAllHistoryCommand.NotifyCanExecuteChanged();
         DismissOnboardingCommand.NotifyCanExecuteChanged();
         ShowOnboardingAgainCommand.NotifyCanExecuteChanged();
+        DismissRecoveryNoticeCommand.NotifyCanExecuteChanged();
+        OpenRecoveryFolderCommand.NotifyCanExecuteChanged();
+        CopyRecoveryPathCommand.NotifyCanExecuteChanged();
+        ClearRecoveryStateCommand.NotifyCanExecuteChanged();
+        ExportDiagnosticsCommand.NotifyCanExecuteChanged();
     }
 }
 
@@ -720,7 +850,3 @@ public sealed record HotkeyKeyOption(int VirtualKey, string Label)
             .Select(index => new HotkeyKeyOption(0x6F + index, $"F{index}"))
             .ToArray();
 }
-
-
-
-

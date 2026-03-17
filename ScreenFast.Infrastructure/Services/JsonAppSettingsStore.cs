@@ -83,7 +83,10 @@ public sealed class JsonAppSettingsStore : IAppSettingsStore
             Hotkeys = settings.Hotkeys ?? HotkeySettings.CreateDefault(),
             PostRecordingOpenBehavior = Enum.IsDefined(settings.PostRecordingOpenBehavior)
                 ? settings.PostRecordingOpenBehavior
-                : PostRecordingOpenBehavior.None
+                : PostRecordingOpenBehavior.None,
+            DismissedRecoverySessionId = string.IsNullOrWhiteSpace(settings.DismissedRecoverySessionId)
+                ? null
+                : settings.DismissedRecoverySessionId
         };
     }
 }

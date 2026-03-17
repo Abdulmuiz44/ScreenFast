@@ -9,6 +9,13 @@ namespace ScreenFast.Audio.Services;
 
 internal abstract class WasapiAudioCaptureServiceBase
 {
+    private readonly IScreenFastLogService _logService;
+
+    protected WasapiAudioCaptureServiceBase(IScreenFastLogService logService)
+    {
+        _logService = logService;
+    }
+
     protected async Task<OperationResult<IAudioCaptureSession>> StartAsync(
         AudioInputKind kind,
         Func<MMDevice, WasapiCapture> captureFactory,
@@ -24,7 +31,7 @@ internal abstract class WasapiAudioCaptureServiceBase
             using var enumerator = new MMDeviceEnumerator();
             var device = enumerator.GetDefaultAudioEndpoint(dataFlow, Role.Multimedia);
             var capture = captureFactory(device);
-            var session = new WasapiAudioCaptureSession(kind, device, capture, onAudioChunk, onError);
+            var session = new WasapiAudioCaptureSession(kind, device, capture, onAudioChunk, onError, _logService);
 
             var startResult = await session.StartAsync(cancellationToken);
             if (!startResult.IsSuccess)
@@ -33,10 +40,12 @@ internal abstract class WasapiAudioCaptureServiceBase
                 return OperationResult<IAudioCaptureSession>.Failure(startResult.Error!);
             }
 
+            _logService.Info("audio.capture_started", "ScreenFast audio capture started.", new Dictionary<string, object?> { ["kind"] = kind.ToString() });
             return OperationResult<IAudioCaptureSession>.Success(session);
         }
         catch (Exception ex)
         {
+            _logService.Warning("audio.capture_start_failed", ex.Message, new Dictionary<string, object?> { ["kind"] = kind.ToString() });
             return OperationResult<IAudioCaptureSession>.Failure(AudioErrorFactory.DeviceUnavailable(kind, ex.Message));
         }
     }
@@ -48,6 +57,7 @@ internal abstract class WasapiAudioCaptureServiceBase
         private readonly WasapiCapture _capture;
         private readonly Action<AudioChunk> _onAudioChunk;
         private readonly Action<AppError> _onError;
+        private readonly IScreenFastLogService _logService;
         private readonly BufferedWaveProvider _bufferedProvider;
         private readonly ISampleProvider _sampleProvider;
         private readonly CancellationTokenSource _pumpCancellation = new();
@@ -64,13 +74,15 @@ internal abstract class WasapiAudioCaptureServiceBase
             MMDevice device,
             WasapiCapture capture,
             Action<AudioChunk> onAudioChunk,
-            Action<AppError> onError)
+            Action<AppError> onError,
+            IScreenFastLogService logService)
         {
             _kind = kind;
             _device = device;
             _capture = capture;
             _onAudioChunk = onAudioChunk;
             _onError = onError;
+            _logService = logService;
             _bufferedProvider = new BufferedWaveProvider(capture.WaveFormat)
             {
                 DiscardOnBufferOverflow = true,
@@ -93,6 +105,7 @@ internal abstract class WasapiAudioCaptureServiceBase
             }
             catch (Exception ex)
             {
+                _logService.Warning("audio.capture_start_failed", ex.Message, new Dictionary<string, object?> { ["kind"] = _kind.ToString() });
                 return Task.FromResult(OperationResult.Failure(AudioErrorFactory.DeviceUnavailable(_kind, ex.Message)));
             }
         }
@@ -106,6 +119,7 @@ internal abstract class WasapiAudioCaptureServiceBase
 
             _isPaused = true;
             _bufferedProvider.ClearBuffer();
+            _logService.Info("audio.capture_paused", "ScreenFast audio capture paused.", new Dictionary<string, object?> { ["kind"] = _kind.ToString() });
             return OperationResult.Success();
         }
 
@@ -118,6 +132,7 @@ internal abstract class WasapiAudioCaptureServiceBase
 
             _bufferedProvider.ClearBuffer();
             _isPaused = false;
+            _logService.Info("audio.capture_resumed", "ScreenFast audio capture resumed.", new Dictionary<string, object?> { ["kind"] = _kind.ToString() });
             return OperationResult.Success();
         }
 
@@ -130,7 +145,6 @@ internal abstract class WasapiAudioCaptureServiceBase
 
             cancellationToken.ThrowIfCancellationRequested();
             _isStopped = true;
-
             _pumpCancellation.Cancel();
 
             try
@@ -152,6 +166,7 @@ internal abstract class WasapiAudioCaptureServiceBase
                 }
             }
 
+            _logService.Info("audio.capture_stopped", "ScreenFast audio capture stopped.", new Dictionary<string, object?> { ["kind"] = _kind.ToString() });
             return OperationResult.Success();
         }
 
@@ -248,6 +263,7 @@ internal abstract class WasapiAudioCaptureServiceBase
                 _hasFaulted = true;
             }
 
+            _logService.Warning("audio.capture_runtime_failure", message, new Dictionary<string, object?> { ["kind"] = _kind.ToString() });
             _onError(AudioErrorFactory.RuntimeFailure(_kind, message));
         }
     }

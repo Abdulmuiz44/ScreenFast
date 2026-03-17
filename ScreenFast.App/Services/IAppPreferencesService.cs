@@ -22,4 +22,6 @@ public interface IAppPreferencesService
         PostRecordingOpenBehavior postRecordingOpenBehavior,
         bool isOnboardingDismissed,
         CancellationToken cancellationToken = default);
+
+    Task<OperationResult> UpdateDismissedRecoverySessionAsync(string? sessionId, CancellationToken cancellationToken = default);
 }

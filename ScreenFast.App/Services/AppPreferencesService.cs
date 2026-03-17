@@ -9,6 +9,7 @@ public sealed class AppPreferencesService : IAppPreferencesService
     private readonly IAppSettingsStore _settingsStore;
     private readonly IRecorderOrchestrator _recorderOrchestrator;
     private readonly ICaptureItemResolver _captureItemResolver;
+    private readonly IScreenFastLogService _logService;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     private bool _isInitialized;
@@ -16,11 +17,13 @@ public sealed class AppPreferencesService : IAppPreferencesService
     public AppPreferencesService(
         IAppSettingsStore settingsStore,
         IRecorderOrchestrator recorderOrchestrator,
-        ICaptureItemResolver captureItemResolver)
+        ICaptureItemResolver captureItemResolver,
+        IScreenFastLogService logService)
     {
         _settingsStore = settingsStore;
         _recorderOrchestrator = recorderOrchestrator;
         _captureItemResolver = captureItemResolver;
+        _logService = logService;
         CurrentSettings = AppSettings.CreateDefault();
     }
 
@@ -42,12 +45,14 @@ public sealed class AppPreferencesService : IAppPreferencesService
         if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
         {
             messages.Add(loadResult.WarningMessage);
+            _logService.Warning("settings.load_warning", loadResult.WarningMessage);
         }
 
         if (!string.IsNullOrWhiteSpace(settings.OutputFolder) && !Directory.Exists(settings.OutputFolder))
         {
             settings = settings with { OutputFolder = null };
             messages.Add("The saved output folder was missing, so ScreenFast cleared it.");
+            _logService.Warning("settings.output_folder_missing", "ScreenFast cleared the saved output folder because it no longer exists.");
         }
 
         CaptureSourceModel? restoredSource = null;
@@ -58,11 +63,23 @@ public sealed class AppPreferencesService : IAppPreferencesService
             {
                 restoredSource = settings.LastSelectedSource;
                 messages.Add("Restored the previous capture source.");
+                _logService.Info(
+                    "settings.source_restored",
+                    "ScreenFast restored the previous capture source.",
+                    new Dictionary<string, object?>
+                    {
+                        ["sourceSummary"] = $"{restoredSource.TypeDisplayName}: {restoredSource.DisplayName}",
+                        ["sourceId"] = restoredSource.SourceId
+                    });
             }
             else
             {
                 settings = settings with { LastSelectedSource = null };
                 messages.Add("The previous capture source is no longer available. Select a new one.");
+                _logService.Warning(
+                    "settings.source_restore_failed",
+                    "The saved capture source could not be restored.",
+                    new Dictionary<string, object?> { ["error"] = sourceResult.Error?.Message });
             }
         }
 
@@ -75,6 +92,7 @@ public sealed class AppPreferencesService : IAppPreferencesService
         _recorderOrchestrator.SnapshotChanged += OnSnapshotChanged;
         _isInitialized = true;
         SettingsChanged?.Invoke(this, CurrentSettings);
+        _logService.Info("settings.loaded", "ScreenFast loaded app settings successfully.");
 
         await PersistAsync(CurrentSettings, cancellationToken);
     }
@@ -83,6 +101,15 @@ public sealed class AppPreferencesService : IAppPreferencesService
     {
         CurrentSettings = CurrentSettings with { Hotkeys = hotkeys };
         SettingsChanged?.Invoke(this, CurrentSettings);
+        _logService.Info(
+            "settings.hotkeys_updated",
+            "ScreenFast updated the hotkey settings.",
+            new Dictionary<string, object?>
+            {
+                ["start"] = hotkeys.StartRecording.DisplayText,
+                ["stop"] = hotkeys.StopRecording.DisplayText,
+                ["pauseResume"] = hotkeys.PauseResumeRecording.DisplayText
+            });
         return await PersistAsync(CurrentSettings, cancellationToken);
     }
 
@@ -96,6 +123,15 @@ public sealed class AppPreferencesService : IAppPreferencesService
         };
 
         SettingsChanged?.Invoke(this, CurrentSettings);
+        _logService.Info(
+            "settings.tray_behavior_updated",
+            "ScreenFast updated tray behavior preferences.",
+            new Dictionary<string, object?>
+            {
+                ["launchMinimizedToTray"] = launchMinimizedToTray,
+                ["closeToTray"] = closeToTray,
+                ["minimizeToTray"] = minimizeToTray
+            });
         return await PersistAsync(CurrentSettings, cancellationToken);
     }
 
@@ -117,6 +153,32 @@ public sealed class AppPreferencesService : IAppPreferencesService
         };
 
         SettingsChanged?.Invoke(this, CurrentSettings);
+        _logService.Info(
+            "settings.recorder_preferences_updated",
+            "ScreenFast updated recorder preferences.",
+            new Dictionary<string, object?>
+            {
+                ["includeSystemAudio"] = includeSystemAudio,
+                ["includeMicrophone"] = includeMicrophone,
+                ["qualityPreset"] = qualityPreset,
+                ["postRecordingOpenBehavior"] = postRecordingOpenBehavior,
+                ["isOnboardingDismissed"] = isOnboardingDismissed
+            });
+        return await PersistAsync(CurrentSettings, cancellationToken);
+    }
+
+    public async Task<OperationResult> UpdateDismissedRecoverySessionAsync(string? sessionId, CancellationToken cancellationToken = default)
+    {
+        CurrentSettings = CurrentSettings with
+        {
+            DismissedRecoverySessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId
+        };
+
+        SettingsChanged?.Invoke(this, CurrentSettings);
+        _logService.Info(
+            "settings.recovery_dismissal_updated",
+            "ScreenFast updated the dismissed recovery marker id.",
+            new Dictionary<string, object?> { ["sessionId"] = CurrentSettings.DismissedRecoverySessionId });
         return await PersistAsync(CurrentSettings, cancellationToken);
     }
 
@@ -146,7 +208,16 @@ public sealed class AppPreferencesService : IAppPreferencesService
         await _saveGate.WaitAsync(cancellationToken);
         try
         {
-            return await _settingsStore.SaveAsync(settings, cancellationToken);
+            var result = await _settingsStore.SaveAsync(settings, cancellationToken);
+            if (!result.IsSuccess)
+            {
+                _logService.Warning(
+                    "settings.save_failed",
+                    "ScreenFast could not save settings.",
+                    new Dictionary<string, object?> { ["error"] = result.Error?.Message });
+            }
+
+            return result;
         }
         finally
         {
