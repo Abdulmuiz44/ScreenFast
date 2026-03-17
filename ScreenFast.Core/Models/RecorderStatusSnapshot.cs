@@ -1,4 +1,4 @@
-﻿using ScreenFast.Core.State;
+using ScreenFast.Core.State;
 
 namespace ScreenFast.Core.Models;
 
@@ -9,7 +9,9 @@ public sealed record RecorderStatusSnapshot(
     CaptureSourceModel? SelectedSource,
     string? OutputFolder,
     bool IncludeSystemAudio,
-    bool IncludeMicrophone)
+    bool IncludeMicrophone,
+    VideoQualityPreset QualityPreset,
+    PostRecordingOpenBehavior PostRecordingOpenBehavior)
 {
     public static RecorderStatusSnapshot CreateDefault() =>
         new(
@@ -19,5 +21,7 @@ public sealed record RecorderStatusSnapshot(
             null,
             null,
             false,
-            false);
+            false,
+            VideoQualityPreset.Standard,
+            PostRecordingOpenBehavior.None);
 }

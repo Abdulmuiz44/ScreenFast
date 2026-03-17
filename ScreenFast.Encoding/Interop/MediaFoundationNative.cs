@@ -9,8 +9,11 @@ internal static class MediaFoundationNative
     public const int ProgressiveInterlaceMode = 2;
 
     public static readonly Guid MFMediaTypeVideo = new("73646976-0000-0010-8000-00AA00389B71");
+    public static readonly Guid MFMediaTypeAudio = new("73647561-0000-0010-8000-00AA00389B71");
     public static readonly Guid MFVideoFormatH264 = new("34363248-0000-0010-8000-00AA00389B71");
     public static readonly Guid MFVideoFormatArgb32 = new("00000015-0000-0010-8000-00AA00389B71");
+    public static readonly Guid MFAudioFormatAac = new("00001610-0000-0010-8000-00AA00389B71");
+    public static readonly Guid MFAudioFormatPcm = new("00000001-0000-0010-8000-00AA00389B71");
     public static readonly Guid MFMtMajorType = new("48EBA18E-F8C9-4687-BF11-0A74C9F96A8F");
     public static readonly Guid MFMtSubtype = new("F7E34C9A-42E8-4714-B74B-CB29D72C35E5");
     public static readonly Guid MFMtAvgBitrate = new("20332624-FB0D-4D9E-BD0D-CBF6786C102E");
@@ -18,6 +21,14 @@ internal static class MediaFoundationNative
     public static readonly Guid MFMtFrameSize = new("1652C33D-D6B2-4012-B834-72030849A37D");
     public static readonly Guid MFMtFrameRate = new("C459A2E8-3D2C-4E44-B132-FEE5156C7BB0");
     public static readonly Guid MFMtPixelAspectRatio = new("C6376A1E-8D0A-4027-BE45-6D9A0AD39BB6");
+    public static readonly Guid MFMtAudioNumChannels = new("37E48BF5-645E-4C5B-89DE-ADA9E29B696A");
+    public static readonly Guid MFMtAudioSamplesPerSecond = new("5FAEEAE7-0290-4C31-9E8A-C534F68D9DBA");
+    public static readonly Guid MFMtAudioAvgBytesPerSecond = new("1AAB75C8-CF4D-19E4-6CA9-4B4C2D66C3CF");
+    public static readonly Guid MFMtAudioBlockAlignment = new("322DE230-9Eeb-43bd-AB7A-FF412251541D");
+    public static readonly Guid MFMtAudioBitsPerSample = new("F2DEB57F-40FA-4764-AA33-ED4F2D1FF669");
+    public static readonly Guid MFMtAudioValidBitsPerSample = new("F2DEB57F-40FA-4764-AA33-ED4F2D1FF669");
+    public static readonly Guid MFMtAacPayloadType = new("BFBABE79-7434-4d1c-94F0-72A3B9E17188");
+    public static readonly Guid MFMtAacAudioProfileLevelIndication = new("7632F0E6-9538-4d61-ACDA-EA29C8C14456");
     public static readonly Guid MFReadwriteEnableHardwareTransforms = new("A634A91C-822B-41B9-A494-4DE4643612B0");
     public static readonly Guid MFSinkWriterD3DManager = new("EC822DA2-E1E9-4B29-A0D8-563C719F5269");
 
@@ -38,6 +49,9 @@ internal static class MediaFoundationNative
 
     [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFCreateDXGIDeviceManager(out uint resetToken, out IMFDXGIDeviceManager deviceManager);
+
+    [DllImport("mfplat.dll", ExactSpelling = true)]
+    public static extern int MFCreateMemoryBuffer(uint maxLength, out IMFMediaBuffer buffer);
 
     [DllImport("mfapi.dll", ExactSpelling = true)]
     public static extern int MFSetAttributeSize(IMFAttributes attributes, in Guid key, uint width, uint height);
@@ -129,6 +143,11 @@ internal static class MediaFoundationNative
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IMFMediaBuffer
     {
+        int Lock(out nint buffer, out uint maxLength, out uint currentLength);
+        int Unlock();
+        int GetCurrentLength(out uint currentLength);
+        int SetCurrentLength(uint currentLength);
+        int GetMaxLength(out uint maxLength);
     }
 
     [ComImport]

@@ -1,4 +1,4 @@
-﻿using ScreenFast.Core.Models;
+using ScreenFast.Core.Models;
 
 namespace ScreenFast.Core.Interfaces;
 
@@ -10,13 +10,25 @@ public interface IRecorderOrchestrator
 
     void SetWindowHandle(nint windowHandle);
 
-    void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone);
+    void ApplyPersistedSettings(AppSettings settings, CaptureSourceModel? restoredSource, string? startupMessage);
+
+    void UpdateAudioPreferences(bool includeSystemAudio, bool includeMicrophone, PostRecordingOpenBehavior postRecordingOpenBehavior);
+
+    void UpdateQualityPreset(VideoQualityPreset preset);
+
+    void PublishUserMessage(string message);
 
     Task SelectSourceAsync(CancellationToken cancellationToken = default);
 
     Task ChooseOutputFolderAsync(CancellationToken cancellationToken = default);
 
     Task StartRecordingAsync(CancellationToken cancellationToken = default);
+
+    Task PauseRecordingAsync(CancellationToken cancellationToken = default);
+
+    Task ResumeRecordingAsync(CancellationToken cancellationToken = default);
+
+    Task TogglePauseResumeAsync(CancellationToken cancellationToken = default);
 
     Task StopRecordingAsync(CancellationToken cancellationToken = default);
 }
