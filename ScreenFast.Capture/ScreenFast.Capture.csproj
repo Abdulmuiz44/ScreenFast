@@ -8,6 +8,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" ExcludeAssets="build;buildTransitive;native;runtime" PrivateAssets="all" />
   </ItemGroup>
 </Project>

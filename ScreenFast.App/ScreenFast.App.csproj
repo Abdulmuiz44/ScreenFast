@@ -3,7 +3,6 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>ScreenFast.App</RootNamespace>
     <UseWinUI>true</UseWinUI>
-    <UseWindowsForms>true</UseWindowsForms>
     <EnableMsixTooling>false</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <Company>ScreenFast</Company>
@@ -15,7 +14,6 @@
     <InformationalVersion>1.0.0-preview1</InformationalVersion>
     <NeutralLanguage>en-US</NeutralLanguage>
     <Platforms>x64</Platforms>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>

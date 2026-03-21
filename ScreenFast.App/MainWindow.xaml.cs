@@ -5,21 +5,24 @@ using WinRT.Interop;
 
 namespace ScreenFast.App;
 
-public sealed partial class MainWindow : Window
+public sealed partial class MainWindow : Microsoft.UI.Xaml.Window
 {
     private readonly IDesktopShellService _desktopShellService;
+    private readonly IRecordingIndicatorOverlayService _overlayService;
 
-    public MainWindow(MainWindowViewModel viewModel, IDesktopShellService desktopShellService)
+    public MainWindow(MainWindowViewModel viewModel, IDesktopShellService desktopShellService, IRecordingIndicatorOverlayService overlayService)
     {
         InitializeComponent();
         Title = "ScreenFast";
         ViewModel = viewModel;
         _desktopShellService = desktopShellService;
+        _overlayService = overlayService;
         _desktopShellService.MessageChanged += OnShellMessageChanged;
 
         var windowHandle = WindowNative.GetWindowHandle(this);
         ViewModel.InitializeWindowHandle(windowHandle);
         _desktopShellService.Initialize(windowHandle);
+        _overlayService.Initialize(windowHandle);
         Activated += OnActivated;
         Closed += OnClosed;
     }
@@ -41,5 +44,8 @@ public sealed partial class MainWindow : Window
     {
         _desktopShellService.MessageChanged -= OnShellMessageChanged;
         _desktopShellService.Dispose();
+        _overlayService.Dispose();
     }
 }
+
+

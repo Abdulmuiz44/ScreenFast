@@ -5,15 +5,17 @@ using ScreenFast.Core.Interfaces;
 
 namespace ScreenFast.App;
 
-public partial class App : Application
+public partial class App : Microsoft.UI.Xaml.Application
 {
     private Window? _window;
+    private bool _servicesDisposed;
 
     public App()
     {
         InitializeComponent();
         Services = ConfigureServices();
         UnhandledException += OnUnhandledException;
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
     }
 
     public static IServiceProvider Services { get; private set; } = default!;
@@ -40,6 +42,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             logger.Error("app.startup_failed", "ScreenFast failed during startup.", new Dictionary<string, object?> { ["error"] = ex.Message });
+            DisposeServices();
             throw;
         }
     }
@@ -48,7 +51,10 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
         services.AddScreenFast();
-        return services.BuildServiceProvider();
+        return services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateScopes = true
+        });
     }
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
@@ -62,4 +68,31 @@ public partial class App : Application
         {
         }
     }
+
+    private void OnProcessExit(object? sender, EventArgs e)
+    {
+        DisposeServices();
+    }
+
+    private void DisposeServices()
+    {
+        if (_servicesDisposed)
+        {
+            return;
+        }
+
+        _servicesDisposed = true;
+
+        try
+        {
+            if (Services is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+        catch
+        {
+        }
+    }
 }
+

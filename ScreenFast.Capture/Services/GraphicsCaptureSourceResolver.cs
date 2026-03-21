@@ -134,7 +134,7 @@ public sealed class GraphicsCaptureSourceResolver
         NativeMethods.EnumDisplayMonitors(
             nint.Zero,
             nint.Zero,
-            (monitorHandle, _, ref NativeMethods.Rect monitorRect, _) =>
+            (nint monitorHandle, nint hdcMonitor, ref NativeMethods.Rect monitorRect, nint lParam) =>
             {
                 var monitorInfo = new NativeMethods.MonitorInfoEx
                 {
@@ -168,7 +168,7 @@ public sealed class GraphicsCaptureSourceResolver
         var shellWindow = NativeMethods.GetShellWindow();
 
         NativeMethods.EnumWindows(
-            (windowHandle, _) =>
+            (nint windowHandle, nint lParam) =>
             {
                 if (windowHandle == shellWindow || !NativeMethods.IsWindowVisible(windowHandle))
                 {

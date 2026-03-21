@@ -1,5 +1,4 @@
 ﻿using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Graphics.Capture;
 
 namespace ScreenFast.Capture.Interop;
@@ -10,7 +9,7 @@ internal static class GraphicsCaptureItemInterop
 
     public static GraphicsCaptureItem CreateForWindow(nint windowHandle)
     {
-        var factory = (IGraphicsCaptureItemInterop)WindowsRuntimeMarshal.GetActivationFactory(typeof(GraphicsCaptureItem));
+        var factory = GetActivationFactory<IGraphicsCaptureItemInterop>(typeof(GraphicsCaptureItem).FullName!);
         var itemPointer = factory.CreateForWindow(windowHandle, GraphicsCaptureItemGuid);
 
         try
@@ -25,7 +24,7 @@ internal static class GraphicsCaptureItemInterop
 
     public static GraphicsCaptureItem CreateForMonitor(nint monitorHandle)
     {
-        var factory = (IGraphicsCaptureItemInterop)WindowsRuntimeMarshal.GetActivationFactory(typeof(GraphicsCaptureItem));
+        var factory = GetActivationFactory<IGraphicsCaptureItemInterop>(typeof(GraphicsCaptureItem).FullName!);
         var itemPointer = factory.CreateForMonitor(monitorHandle, GraphicsCaptureItemGuid);
 
         try
@@ -46,5 +45,28 @@ internal static class GraphicsCaptureItemInterop
         IntPtr CreateForWindow(nint window, in Guid iid);
 
         IntPtr CreateForMonitor(nint monitor, in Guid iid);
+    }
+
+    [DllImport("combase.dll", CharSet = CharSet.Unicode)]
+    private static extern int RoGetActivationFactory(string activatableClassId, ref Guid iid, out nint factory);
+
+    private static T GetActivationFactory<T>(string activatableClassId) where T : class
+    {
+        var iid = typeof(T).GUID;
+        var hr = RoGetActivationFactory(activatableClassId, ref iid, out var factory);
+
+        if (hr < 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
+
+        try
+        {
+            return (T)Marshal.GetTypedObjectForIUnknown(factory, typeof(T));
+        }
+        finally
+        {
+            Marshal.Release(factory);
+        }
     }
 }
