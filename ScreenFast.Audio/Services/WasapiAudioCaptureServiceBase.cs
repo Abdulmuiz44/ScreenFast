@@ -7,7 +7,7 @@ using ScreenFast.Core.Results;
 
 namespace ScreenFast.Audio.Services;
 
-internal abstract class WasapiAudioCaptureServiceBase
+public abstract class WasapiAudioCaptureServiceBase
 {
     private readonly IScreenFastLogService _logService;
 
@@ -268,3 +268,4 @@ internal abstract class WasapiAudioCaptureServiceBase
         }
     }
 }
+

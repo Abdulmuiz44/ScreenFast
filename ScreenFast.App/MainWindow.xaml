@@ -20,6 +20,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <StackPanel Spacing="4">
@@ -44,12 +45,20 @@
                      IsClosable="False"
                      Message="{x:Bind ViewModel.RecoveryNoticeText, Mode=OneWay}">
                 <InfoBar.ActionButton>
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button Command="{x:Bind ViewModel.OpenRecoveryFolderCommand}" Content="Open Folder" />
-                        <Button Command="{x:Bind ViewModel.CopyRecoveryPathCommand}" Content="Copy Path" />
-                        <Button Command="{x:Bind ViewModel.ClearRecoveryStateCommand}" Content="Clear" />
-                        <Button Command="{x:Bind ViewModel.DismissRecoveryNoticeCommand}" Content="Dismiss" />
-                    </StackPanel>
+                    <Button Content="Recovery Actions">
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Text="Open Folder"
+                                                Command="{x:Bind ViewModel.OpenRecoveryFolderCommand}" />
+                                <MenuFlyoutItem Text="Copy Path"
+                                                Command="{x:Bind ViewModel.CopyRecoveryPathCommand}" />
+                                <MenuFlyoutItem Text="Clear"
+                                                Command="{x:Bind ViewModel.ClearRecoveryStateCommand}" />
+                                <MenuFlyoutItem Text="Dismiss"
+                                                Command="{x:Bind ViewModel.DismissRecoveryNoticeCommand}" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
                 </InfoBar.ActionButton>
             </InfoBar>
 
@@ -102,6 +111,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Quality" />
@@ -116,13 +126,24 @@
                                       Header="Microphone"
                                       IsOn="{x:Bind ViewModel.IncludeMicrophone, Mode=TwoWay}" />
 
-                        <TextBlock Grid.Row="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="After Recording" />
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="Before Recording" />
                         <ComboBox Grid.Row="1"
+                                  Grid.Column="1"
+                                  DisplayMemberPath="Label"
+                                  ItemsSource="{x:Bind ViewModel.CountdownOptions, Mode=OneWay}"
+                                  SelectedItem="{x:Bind ViewModel.SelectedCountdownOption, Mode=TwoWay}" />
+                        <ToggleSwitch Grid.Row="1"
+                                      Grid.Column="2"
+                                      Header="Overlay"
+                                      IsOn="{x:Bind ViewModel.OverlayEnabled, Mode=TwoWay}" />
+
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" FontWeight="SemiBold" Text="After Recording" />
+                        <ComboBox Grid.Row="2"
                                   Grid.Column="1"
                                   DisplayMemberPath="Label"
                                   ItemsSource="{x:Bind ViewModel.PostRecordingBehaviors, Mode=OneWay}"
                                   SelectedItem="{x:Bind ViewModel.SelectedPostRecordingBehavior, Mode=TwoWay}" />
-                        <Button Grid.Row="1"
+                        <Button Grid.Row="2"
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
                                 Command="{x:Bind ViewModel.ShowOnboardingAgainCommand}"
@@ -153,21 +174,33 @@
                 </Border>
             </StackPanel>
 
-            <Grid Grid.Row="7" ColumnSpacing="16">
+            <InfoBar Grid.Row="7"
+                     IsOpen="{x:Bind ViewModel.HasDiskSpaceWarning, Mode=OneWay}"
+                     Severity="Warning"
+                     IsClosable="False"
+                     Message="{x:Bind ViewModel.DiskSpaceWarningText, Mode=OneWay}" />
+
+            <Grid Grid.Row="8" ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock FontWeight="SemiBold"
-                           Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
-                           TextWrapping="WrapWholeWords" />
+                <StackPanel Spacing="4">
+                    <TextBlock FontWeight="SemiBold"
+                               Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                               TextWrapping="WrapWholeWords" />
+                    <TextBlock FontSize="20"
+                               FontWeight="SemiBold"
+                               Foreground="IndianRed"
+                               Text="{x:Bind ViewModel.CountdownText, Mode=OneWay}" />
+                </StackPanel>
                 <TextBlock Grid.Column="1"
                            FontFamily="Consolas"
                            Text="{x:Bind ViewModel.TimerText, Mode=OneWay}" />
             </Grid>
 
-            <Grid Grid.Row="8" ColumnSpacing="16">
+            <Grid Grid.Row="9" ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
@@ -178,6 +211,8 @@
                         CornerRadius="8">
                     <StackPanel Spacing="12">
                         <TextBlock FontWeight="SemiBold" Text="Startup and Tray" />
+                        <TextBlock Opacity="0.82" Text="{x:Bind ViewModel.SmokeCheckSummaryText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
+                        <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SmokeCheckDetailsText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
                         <StackPanel Orientation="Horizontal" Spacing="20">
                             <ToggleSwitch Header="Launch Minimized"
                                           IsOn="{x:Bind ViewModel.LaunchMinimizedToTray, Mode=TwoWay}" />
@@ -259,7 +294,7 @@
                 </Border>
             </Grid>
 
-            <Border Grid.Row="9"
+            <Border Grid.Row="10"
                     Padding="16"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     CornerRadius="8">
@@ -312,3 +347,4 @@
         </Grid>
     </ScrollViewer>
 </Window>
+

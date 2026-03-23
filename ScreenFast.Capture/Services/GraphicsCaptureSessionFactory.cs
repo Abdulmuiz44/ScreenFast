@@ -208,7 +208,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                     var frameResult = _frameProcessor(
                         new CapturedFrame(
                             texturePointer,
-                            frame.SystemRelativeTime?.Ticks ?? 0,
+                            frame.SystemRelativeTime.Ticks,
                             frame.ContentSize.Width,
                             frame.ContentSize.Height));
 

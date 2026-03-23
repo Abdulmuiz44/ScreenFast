@@ -2,7 +2,7 @@
 
 namespace ScreenFast.Capture.Interop;
 
-internal sealed class D3D11DeviceResources : IDisposable
+public sealed class D3D11DeviceResources : IDisposable
 {
     public D3D11DeviceResources(nint devicePointer, nint deviceContextPointer, nint dxgiDevicePointer, IDirect3DDevice direct3DDevice)
     {

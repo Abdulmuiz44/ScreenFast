@@ -1,9 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <RootNamespace>ScreenFast.App</RootNamespace>
     <UseWinUI>true</UseWinUI>
-    <UseWindowsForms>true</UseWindowsForms>
     <EnableMsixTooling>false</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <Company>ScreenFast</Company>
@@ -15,8 +14,6 @@
     <InformationalVersion>1.0.0-preview1</InformationalVersion>
     <NeutralLanguage>en-US</NeutralLanguage>
     <Platforms>x64</Platforms>
-    <!-- Windows App SDK still brings legacy win10-* RID assets; keep RID graph compatibility enabled on modern SDKs. -->
-    <UseRidGraph>true</UseRidGraph>
   </PropertyGroup>
 
   <ItemGroup>

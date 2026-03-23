@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ScreenFast.App'">
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+</Project>
