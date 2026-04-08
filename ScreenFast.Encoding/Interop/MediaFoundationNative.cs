@@ -53,11 +53,11 @@ internal static class MediaFoundationNative
     [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFCreateMemoryBuffer(uint maxLength, out IMFMediaBuffer buffer);
 
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    public static extern int MFSetAttributeSize(IMFAttributes attributes, in Guid key, uint width, uint height);
+    public static int MFSetAttributeSize(IMFAttributes attributes, in Guid key, uint width, uint height)
+        => attributes.SetUINT64(key, PackToUInt64(width, height));
 
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    public static extern int MFSetAttributeRatio(IMFAttributes attributes, in Guid key, uint numerator, uint denominator);
+    public static int MFSetAttributeRatio(IMFAttributes attributes, in Guid key, uint numerator, uint denominator)
+        => attributes.SetUINT64(key, PackToUInt64(numerator, denominator));
 
     [DllImport("mf.dll", ExactSpelling = true)]
     public static extern int MFCreateDXGISurfaceBuffer(in Guid riid, nint surface, uint subresourceIndex, [MarshalAs(UnmanagedType.Bool)] bool bottomUpWhenLinear, out IMFMediaBuffer buffer);
@@ -72,6 +72,9 @@ internal static class MediaFoundationNative
             Marshal.ThrowExceptionForHR(hr);
         }
     }
+
+    private static ulong PackToUInt64(uint high, uint low)
+        => ((ulong)high << 32) | low;
 
     [ComImport]
     [Guid("2CD2D921-C447-44A7-A13C-4ADABFC247E3")]
