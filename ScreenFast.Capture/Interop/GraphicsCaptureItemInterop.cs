@@ -5,7 +5,7 @@ namespace ScreenFast.Capture.Interop;
 
 internal static class GraphicsCaptureItemInterop
 {
-    private static readonly Guid GraphicsCaptureItemGuid = typeof(GraphicsCaptureItem).GUID;
+    private static readonly Guid GraphicsCaptureItemGuid = new("79C3F95B-31F7-4EC2-A464-632EF5D30760");
 
     public static GraphicsCaptureItem CreateForWindow(nint windowHandle)
     {

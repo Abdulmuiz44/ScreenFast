@@ -72,9 +72,17 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
         {
             return Task.FromResult(CaptureSourceSelectionResult.Cancelled());
         }
-        catch
+        catch (Exception ex)
         {
-            _logService.Error("source_picker.failed", "ScreenFast failed while opening or handling the source picker dialog.");
+            _logService.Error(
+                "source_picker.failed",
+                "ScreenFast failed while opening or handling the source picker dialog.",
+                new Dictionary<string, object?>
+                {
+                    ["exceptionType"] = ex.GetType().FullName,
+                    ["exceptionMessage"] = ex.Message,
+                    ["exceptionStackTrace"] = ex.StackTrace
+                });
             return Task.FromResult(CaptureSourceSelectionResult.Failure(
                 new AppError(
                     "source_picker_failed",
