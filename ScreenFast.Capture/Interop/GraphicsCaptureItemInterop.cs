@@ -63,17 +63,42 @@ internal static class GraphicsCaptureItemInterop
         int CreateForMonitor(nint monitor, in Guid iid, out nint result);
     }
 
-    [DllImport("combase.dll", CharSet = CharSet.Unicode)]
-    private static extern int RoGetActivationFactory(string activatableClassId, ref Guid iid, out nint factory);
+    [DllImport("combase.dll", ExactSpelling = true)]
+    private static extern int RoGetActivationFactory(nint activatableClassId, ref Guid iid, out nint factory);
+
+    [DllImport("combase.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+    private static extern int WindowsCreateString(string sourceString, int length, out nint hstring);
+
+    [DllImport("combase.dll", ExactSpelling = true)]
+    private static extern int WindowsDeleteString(nint hstring);
 
     private static T GetActivationFactory<T>(string activatableClassId) where T : class
     {
+        nint classId = nint.Zero;
+        nint factory = nint.Zero;
+
+        var createStringHr = WindowsCreateString(activatableClassId, activatableClassId.Length, out classId);
+        if (createStringHr < 0)
+        {
+            Marshal.ThrowExceptionForHR(createStringHr);
+        }
+
         var iid = typeof(T).GUID;
-        var hr = RoGetActivationFactory(activatableClassId, ref iid, out var factory);
+        var hr = RoGetActivationFactory(classId, ref iid, out factory);
 
         if (hr < 0)
         {
-            Marshal.ThrowExceptionForHR(hr);
+            try
+            {
+                Marshal.ThrowExceptionForHR(hr);
+            }
+            finally
+            {
+                if (classId != nint.Zero)
+                {
+                    WindowsDeleteString(classId);
+                }
+            }
         }
 
         try
@@ -83,6 +108,10 @@ internal static class GraphicsCaptureItemInterop
         finally
         {
             Marshal.Release(factory);
+            if (classId != nint.Zero)
+            {
+                WindowsDeleteString(classId);
+            }
         }
     }
 }

@@ -11,10 +11,14 @@ namespace ScreenFast.Capture.Services;
 public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePickerService
 {
     private readonly ICaptureItemResolver _captureItemResolver;
+    private readonly IScreenFastLogService _logService;
 
-    public WindowsGraphicsCaptureSourcePickerService(ICaptureItemResolver captureItemResolver)
+    public WindowsGraphicsCaptureSourcePickerService(
+        ICaptureItemResolver captureItemResolver,
+        IScreenFastLogService logService)
     {
         _captureItemResolver = captureItemResolver;
+        _logService = logService;
     }
 
     public Task<CaptureSourceSelectionResult> PickAsync(nint ownerWindowHandle, CancellationToken cancellationToken = default)
@@ -27,7 +31,12 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            _logService.Info("source_picker.enumerating", "ScreenFast is enumerating available capture sources.");
             var sources = EnumerateSources(ownerWindowHandle).ToArray();
+            _logService.Info(
+                "source_picker.enumerated",
+                "ScreenFast enumerated available capture sources.",
+                new Dictionary<string, object?> { ["count"] = sources.Length });
             if (sources.Length == 0)
             {
                 return Task.FromResult(CaptureSourceSelectionResult.Failure(
@@ -35,14 +44,28 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
             }
 
             using var dialog = new SourcePickerForm(sources);
-            var owner = new Win32Window(ownerWindowHandle);
-            var result = dialog.ShowDialog(owner);
+            _logService.Info("source_picker.dialog_opening", "ScreenFast is opening the custom source picker dialog.");
+            var result = dialog.ShowDialog();
+            _logService.Info(
+                "source_picker.dialog_closed",
+                "ScreenFast closed the custom source picker dialog.",
+                new Dictionary<string, object?> { ["result"] = result.ToString() });
             if (result != Forms.DialogResult.OK || dialog.SelectedSource is null)
             {
                 return Task.FromResult(CaptureSourceSelectionResult.Cancelled());
             }
 
-            _captureItemResolver.Remember(dialog.SelectedSource, dialog.SelectedItem);
+            _logService.Info(
+                "source_picker.creating_item",
+                "ScreenFast is creating a capture item for the selected source.",
+                new Dictionary<string, object?>
+                {
+                    ["sourceId"] = dialog.SelectedSource.SourceId,
+                    ["sourceType"] = dialog.SelectedSource.Type.ToString(),
+                    ["displayName"] = dialog.SelectedSource.DisplayName
+                });
+            var selectedItem = CreateCaptureItem(dialog.SelectedSource);
+            _captureItemResolver.Remember(dialog.SelectedSource, selectedItem);
             return Task.FromResult(CaptureSourceSelectionResult.Success(dialog.SelectedSource));
         }
         catch (OperationCanceledException)
@@ -51,6 +74,7 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
         }
         catch
         {
+            _logService.Error("source_picker.failed", "ScreenFast failed while opening or handling the source picker dialog.");
             return Task.FromResult(CaptureSourceSelectionResult.Failure(
                 new AppError(
                     "source_picker_failed",
@@ -58,7 +82,47 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
         }
     }
 
-    private static IEnumerable<(CaptureSourceModel Source, object NativeItem)> EnumerateCandidatePairs(nint ownerWindowHandle)
+    private static Windows.Graphics.Capture.GraphicsCaptureItem CreateCaptureItem(CaptureSourceModel source)
+    {
+        if (!TryParseHandle(source.SourceId, out var prefix, out var handle) || handle == nint.Zero)
+        {
+            throw new InvalidOperationException("The selected source handle is invalid.");
+        }
+
+        return prefix switch
+        {
+            "window" => GraphicsCaptureItemInterop.CreateForWindow(handle),
+            "display" => GraphicsCaptureItemInterop.CreateForMonitor(handle),
+            _ => throw new InvalidOperationException("The selected source type is not supported.")
+        };
+    }
+
+    private static bool TryParseHandle(string sourceId, out string prefix, out nint handle)
+    {
+        prefix = string.Empty;
+        handle = nint.Zero;
+
+        var parts = sourceId.Split(':', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+        {
+            return false;
+        }
+
+        prefix = parts[0].ToLowerInvariant();
+        var rawValue = parts[1].StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? parts[1][2..]
+            : parts[1];
+
+        if (!long.TryParse(rawValue, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+        {
+            return false;
+        }
+
+        handle = new nint(parsed);
+        return true;
+    }
+
+    private static IEnumerable<CaptureSourceModel> EnumerateCandidatePairs(nint ownerWindowHandle)
     {
         foreach (var display in EnumerateDisplays())
         {
@@ -73,18 +137,12 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
 
     private static IEnumerable<SourceOption> EnumerateSources(nint ownerWindowHandle)
     {
-        foreach (var pair in EnumerateCandidatePairs(ownerWindowHandle))
-        {
-            if (pair.NativeItem is Windows.Graphics.Capture.GraphicsCaptureItem item)
-            {
-                yield return new SourceOption(pair.Source, item);
-            }
-        }
+        return EnumerateCandidatePairs(ownerWindowHandle).Select(source => new SourceOption(source));
     }
 
-    private static IEnumerable<(CaptureSourceModel Source, Windows.Graphics.Capture.GraphicsCaptureItem NativeItem)> EnumerateDisplays()
+    private static IEnumerable<CaptureSourceModel> EnumerateDisplays()
     {
-        var displays = new List<(CaptureSourceModel, Windows.Graphics.Capture.GraphicsCaptureItem)>();
+        var displays = new List<CaptureSourceModel>();
         var displayIndex = 1;
 
         NativeMethods.EnumDisplayMonitors(
@@ -103,41 +161,38 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
                     return true;
                 }
 
-                try
+                var width = Math.Max(0, monitorRect.Right - monitorRect.Left);
+                var height = Math.Max(0, monitorRect.Bottom - monitorRect.Top);
+                if (width == 0 || height == 0)
                 {
-                    var item = GraphicsCaptureItemInterop.CreateForMonitor(monitorHandle);
-                    var width = item.Size.Width;
-                    var height = item.Size.Height;
-                    var name = $"Display {displayIndex}";
-                    if (!string.IsNullOrWhiteSpace(monitorInfo.DeviceName))
-                    {
-                        name += $" ({monitorInfo.DeviceName})";
-                    }
+                    return true;
+                }
 
-                    displays.Add((
-                        new CaptureSourceModel(
-                            $"display:0x{monitorHandle.ToInt64():X}",
-                            CaptureSourceKind.Display,
-                            name,
-                            width,
-                            height),
-                        item));
-                    displayIndex++;
-                }
-                catch
+                var name = $"Display {displayIndex}";
+                if (!string.IsNullOrWhiteSpace(monitorInfo.DeviceName))
                 {
+                    name += $" ({monitorInfo.DeviceName})";
                 }
+
+                displays.Add(
+                    new CaptureSourceModel(
+                        $"display:0x{monitorHandle.ToInt64():X}",
+                        CaptureSourceKind.Display,
+                        name,
+                        width,
+                        height));
+                displayIndex++;
 
                 return true;
             },
             nint.Zero);
 
-        return displays;
+        return displays.OrderBy(display => display.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 
-    private static IEnumerable<(CaptureSourceModel Source, Windows.Graphics.Capture.GraphicsCaptureItem NativeItem)> EnumerateWindows(nint ownerWindowHandle)
+    private static IEnumerable<CaptureSourceModel> EnumerateWindows(nint ownerWindowHandle)
     {
-        var windows = new List<(CaptureSourceModel, Windows.Graphics.Capture.GraphicsCaptureItem)>();
+        var windows = new List<CaptureSourceModel>();
         var shellWindow = NativeMethods.GetShellWindow();
 
         NativeMethods.EnumWindows(
@@ -168,42 +223,36 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
                     return true;
                 }
 
-                try
+                if (!NativeMethods.GetWindowRect(windowHandle, out var windowRect))
                 {
-                    var item = GraphicsCaptureItemInterop.CreateForWindow(windowHandle);
-                    windows.Add((
-                        new CaptureSourceModel(
-                            $"window:0x{windowHandle.ToInt64():X}",
-                            CaptureSourceKind.Window,
-                            title,
-                            item.Size.Width,
-                            item.Size.Height),
-                        item));
+                    return true;
                 }
-                catch
+
+                var width = Math.Max(0, windowRect.Right - windowRect.Left);
+                var height = Math.Max(0, windowRect.Bottom - windowRect.Top);
+                if (width == 0 || height == 0)
                 {
+                    return true;
                 }
+
+                windows.Add(
+                    new CaptureSourceModel(
+                        $"window:0x{windowHandle.ToInt64():X}",
+                        CaptureSourceKind.Window,
+                        title,
+                        width,
+                        height));
 
                 return true;
             },
             nint.Zero);
 
         return windows
-            .OrderBy(window => window.Item1.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(window => window.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
     }
 
-    private sealed class Win32Window : Forms.IWin32Window
-    {
-        public Win32Window(nint handle)
-        {
-            Handle = handle;
-        }
-
-        public nint Handle { get; }
-    }
-
-    private sealed record SourceOption(CaptureSourceModel Source, Windows.Graphics.Capture.GraphicsCaptureItem NativeItem)
+    private sealed record SourceOption(CaptureSourceModel Source)
     {
         public override string ToString() => $"{Source.TypeDisplayName}: {Source.DisplayName} ({Source.Width} x {Source.Height})";
     }
@@ -223,6 +272,7 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
+            TopMost = true;
 
             var description = new Forms.Label
             {
@@ -274,8 +324,6 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
         }
 
         public CaptureSourceModel? SelectedSource { get; private set; }
-        public Windows.Graphics.Capture.GraphicsCaptureItem? SelectedItem { get; private set; }
-
         private void ConfirmSelection()
         {
             if (_listBox.SelectedItem is not SourceOption selected)
@@ -284,7 +332,6 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
             }
 
             SelectedSource = selected.Source;
-            SelectedItem = selected.NativeItem;
             DialogResult = Forms.DialogResult.OK;
             Close();
         }
