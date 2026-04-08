@@ -7,6 +7,7 @@ namespace ScreenFast.Infrastructure.Services;
 
 public sealed class RecordingPreflightValidator : IRecordingPreflightValidator
 {
+    private const long HardMinimumBytes = 1L * 1024 * 1024 * 1024;
     private readonly IScreenFastLogService _logService;
 
     public RecordingPreflightValidator(IScreenFastLogService logService)
@@ -14,28 +15,28 @@ public sealed class RecordingPreflightValidator : IRecordingPreflightValidator
         _logService = logService;
     }
 
-    public Task<OperationResult> ValidateAsync(RecorderStatusSnapshot snapshot, CancellationToken cancellationToken = default)
+    public Task<RecordingPreflightResult> ValidateAsync(RecorderStatusSnapshot snapshot, CancellationToken cancellationToken = default)
     {
-        OperationResult result;
+        RecordingPreflightResult result;
         if (snapshot.State is RecorderState.Recording or RecorderState.Stopping or RecorderState.Selecting)
         {
-            result = OperationResult.Failure(AppError.PreflightFailed("ScreenFast is busy right now. Wait a moment and try recording again."));
+            result = RecordingPreflightResult.Failure(AppError.PreflightFailed("ScreenFast is busy right now. Wait a moment and try recording again."));
         }
         else if (snapshot.SelectedSource is null)
         {
-            result = OperationResult.Failure(AppError.PreflightFailed("Select a display or window before recording."));
+            result = RecordingPreflightResult.Failure(AppError.PreflightFailed("Select a display or window before recording."));
         }
         else if (snapshot.SelectedSource.Width <= 0 || snapshot.SelectedSource.Height <= 0)
         {
-            result = OperationResult.Failure(AppError.PreflightFailed("The selected source dimensions are invalid. Re-select the source and try again."));
+            result = RecordingPreflightResult.Failure(AppError.PreflightFailed("The selected source dimensions are invalid. Re-select the source and try again."));
         }
         else if (string.IsNullOrWhiteSpace(snapshot.OutputFolder))
         {
-            result = OperationResult.Failure(AppError.PreflightFailed("Choose an output folder before recording."));
+            result = RecordingPreflightResult.Failure(AppError.PreflightFailed("Choose an output folder before recording."));
         }
         else if (!Directory.Exists(snapshot.OutputFolder))
         {
-            result = OperationResult.Failure(AppError.PreflightFailed("The selected output folder no longer exists. Choose it again before recording."));
+            result = RecordingPreflightResult.Failure(AppError.PreflightFailed("The selected output folder no longer exists. Choose it again before recording."));
         }
         else
         {
@@ -51,17 +52,18 @@ public sealed class RecordingPreflightValidator : IRecordingPreflightValidator
                     File.Delete(probePath);
                 }
 
-                result = OperationResult.Success();
+                var freeSpaceCheck = ValidateFreeSpace(snapshot.OutputFolder, snapshot.QualityPreset);
+                result = freeSpaceCheck;
             }
             catch
             {
-                result = OperationResult.Failure(AppError.PreflightFailed("ScreenFast cannot write to the selected output folder. Pick a writable folder and try again."));
+                result = RecordingPreflightResult.Failure(AppError.PreflightFailed("ScreenFast cannot write to the selected output folder. Pick a writable folder and try again."));
             }
         }
 
-        if (result.IsSuccess)
+        if (result.CanStart)
         {
-            _logService.Info("preflight.passed", "Recording preflight validation succeeded.");
+            _logService.Info("preflight.passed", "Recording preflight validation succeeded.", new Dictionary<string, object?> { ["warning"] = result.WarningMessage });
         }
         else
         {
@@ -69,5 +71,42 @@ public sealed class RecordingPreflightValidator : IRecordingPreflightValidator
         }
 
         return Task.FromResult(result);
+    }
+
+    private RecordingPreflightResult ValidateFreeSpace(string outputFolder, VideoQualityPreset preset)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(outputFolder));
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                return RecordingPreflightResult.Success();
+            }
+
+            var driveInfo = new DriveInfo(root);
+            var freeBytes = driveInfo.AvailableFreeSpace;
+            if (freeBytes < HardMinimumBytes)
+            {
+                return RecordingPreflightResult.Failure(AppError.PreflightFailed("The output drive is too low on free space. Free up at least 1 GB, then try again."));
+            }
+
+            var advisoryBytes = preset switch
+            {
+                VideoQualityPreset.Standard => 3L * 1024 * 1024 * 1024,
+                VideoQualityPreset.High => 5L * 1024 * 1024 * 1024,
+                _ => 8L * 1024 * 1024 * 1024
+            };
+
+            if (freeBytes < advisoryBytes)
+            {
+                return RecordingPreflightResult.Success($"Free space is getting low on this drive. {preset} recordings can consume space quickly.");
+            }
+
+            return RecordingPreflightResult.Success();
+        }
+        catch
+        {
+            return RecordingPreflightResult.Success();
+        }
     }
 }

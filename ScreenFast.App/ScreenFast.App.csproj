@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>ScreenFast.App</RootNamespace>
     <UseWinUI>true</UseWinUI>
+    <WindowsAppSdkBootstrapInitialize>true</WindowsAppSdkBootstrapInitialize>
     <EnableMsixTooling>false</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <Company>ScreenFast</Company>

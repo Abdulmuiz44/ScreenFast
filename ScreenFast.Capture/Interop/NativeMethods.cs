@@ -28,6 +28,9 @@ internal static class NativeMethods
     public static extern int GetWindowTextLength(nint windowHandle);
 
     [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(nint windowHandle, out Rect rect);
+
+    [DllImport("user32.dll")]
     public static extern nint GetShellWindow();
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]

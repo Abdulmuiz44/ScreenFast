@@ -20,7 +20,7 @@ public partial class App : Microsoft.UI.Xaml.Application
 
     public static IServiceProvider Services { get; private set; } = default!;
 
-    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         var logger = Services.GetRequiredService<IScreenFastLogService>();
         logger.Info("app.startup", "ScreenFast is starting.");
@@ -28,20 +28,32 @@ public partial class App : Microsoft.UI.Xaml.Application
         try
         {
             var preferencesService = Services.GetRequiredService<IAppPreferencesService>();
-            preferencesService.InitializeAsync().GetAwaiter().GetResult();
+            logger.Info("app.startup_step", "Initializing preferences.");
+            await preferencesService.InitializeAsync();
 
             var recoveryService = Services.GetRequiredService<IRecoveryService>();
-            recoveryService.InitializeAsync().GetAwaiter().GetResult();
+            logger.Info("app.startup_step", "Initializing recovery.");
+            await recoveryService.InitializeAsync();
 
+            logger.Info("app.startup_step", "Resolving main window.");
             _window = Services.GetRequiredService<MainWindow>();
+            logger.Info("app.startup_step", "Activating main window.");
             _window.Activate();
 
+            logger.Info("app.startup_step", "Applying desktop shell startup behavior.");
             Services.GetRequiredService<IDesktopShellService>().ApplyStartupBehavior();
             logger.Info("app.startup_complete", "ScreenFast startup completed successfully.");
         }
         catch (Exception ex)
         {
-            logger.Error("app.startup_failed", "ScreenFast failed during startup.", new Dictionary<string, object?> { ["error"] = ex.Message });
+            logger.Error(
+                "app.startup_failed",
+                "ScreenFast failed during startup.",
+                new Dictionary<string, object?>
+                {
+                    ["error"] = ex.Message,
+                    ["exception"] = ex.ToString()
+                });
             DisposeServices();
             throw;
         }

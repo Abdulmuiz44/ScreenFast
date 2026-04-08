@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ScreenFast.App": {
+      "commandName": "Project",
+      "workingDirectory": "C:\\Users\\Hp\\Documents\\Github\\ScreenFast\\ScreenFast.App"
+    }
+  }
+}

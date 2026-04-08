@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using ScreenFast.Capture.Interop;
 using ScreenFast.Core.Models;
@@ -11,16 +11,10 @@ public sealed class GraphicsCaptureSourceResolver
 {
     public CaptureSourceSelectionResult Resolve(GraphicsCaptureItem selectedItem)
     {
-        var exactMatch = TryResolveByComIdentity(selectedItem);
-        if (exactMatch is not null)
+        var resolvedMatch = TryResolveByMetadata(selectedItem);
+        if (resolvedMatch is not null)
         {
-            return CaptureSourceSelectionResult.Success(exactMatch);
-        }
-
-        var fallbackMatch = TryResolveByMetadata(selectedItem);
-        if (fallbackMatch is not null)
-        {
-            return CaptureSourceSelectionResult.Success(fallbackMatch);
+            return CaptureSourceSelectionResult.Success(resolvedMatch);
         }
 
         return CaptureSourceSelectionResult.Failure(
@@ -29,103 +23,55 @@ public sealed class GraphicsCaptureSourceResolver
                 "Windows returned a capture source, but ScreenFast could not identify whether it was a window or display. Try selecting a different source."));
     }
 
-    private CaptureSourceModel? TryResolveByComIdentity(GraphicsCaptureItem selectedItem)
-    {
-        var selectedIdentity = GetIdentityPointer(selectedItem);
-        if (selectedIdentity == nint.Zero)
-        {
-            return null;
-        }
-
-        try
-        {
-            foreach (var candidate in EnumerateCandidates())
-            {
-                var candidateItem = CreateCandidateItem(candidate);
-                if (candidateItem is null)
-                {
-                    continue;
-                }
-
-                var candidateIdentity = GetIdentityPointer(candidateItem);
-                if (candidateIdentity == nint.Zero)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    if (candidateIdentity == selectedIdentity)
-                    {
-                        return candidate.ToModel(selectedItem.DisplayName, selectedItem.Size.Width, selectedItem.Size.Height);
-                    }
-                }
-                finally
-                {
-                    Marshal.Release(candidateIdentity);
-                }
-            }
-        }
-        finally
-        {
-            Marshal.Release(selectedIdentity);
-        }
-
-        return null;
-    }
-
     private CaptureSourceModel? TryResolveByMetadata(GraphicsCaptureItem selectedItem)
     {
-        var matches = EnumerateCandidates()
-            .Where(candidate => candidate.Width == selectedItem.Size.Width && candidate.Height == selectedItem.Size.Height)
-            .Where(candidate =>
-                string.Equals(candidate.DisplayName, selectedItem.DisplayName, StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrWhiteSpace(selectedItem.DisplayName))
-            .Take(2)
-            .ToArray();
+        var selectedName = selectedItem.DisplayName?.Trim() ?? string.Empty;
+        var width = selectedItem.Size.Width;
+        var height = selectedItem.Size.Height;
 
-        return matches.Length == 1
-            ? matches[0].ToModel(selectedItem.DisplayName, selectedItem.Size.Width, selectedItem.Size.Height)
+        var matchingDisplays = FindMatches(EnumerateDisplays(), selectedName, width, height);
+        if (matchingDisplays.Length == 1)
+        {
+            return matchingDisplays[0].ToModel(selectedName, width, height);
+        }
+
+        var matchingWindows = FindMatches(EnumerateWindows(), selectedName, width, height);
+        if (matchingWindows.Length == 1)
+        {
+            return matchingWindows[0].ToModel(selectedName, width, height);
+        }
+
+        var fallbackMatches = matchingDisplays.Concat(matchingWindows).Take(2).ToArray();
+        return fallbackMatches.Length == 1
+            ? fallbackMatches[0].ToModel(selectedName, width, height)
             : null;
     }
 
-    private static nint GetIdentityPointer(object obj)
+    private static CaptureSourceCandidate[] FindMatches(
+        IEnumerable<CaptureSourceCandidate> candidates,
+        string selectedName,
+        int width,
+        int height)
     {
-        try
-        {
-            return Marshal.GetIUnknownForObject(obj);
-        }
-        catch
-        {
-            return nint.Zero;
-        }
-    }
+        var sizeMatches = candidates
+            .Where(candidate => candidate.Width == width && candidate.Height == height)
+            .Take(8)
+            .ToArray();
 
-    private static GraphicsCaptureItem? CreateCandidateItem(CaptureSourceCandidate candidate)
-    {
-        try
+        if (!string.IsNullOrWhiteSpace(selectedName))
         {
-            return candidate.Kind == CaptureSourceKind.Window
-                ? GraphicsCaptureItemInterop.CreateForWindow(candidate.Handle)
-                : GraphicsCaptureItemInterop.CreateForMonitor(candidate.Handle);
-        }
-        catch
-        {
-            return null;
-        }
-    }
+            var namedMatches = sizeMatches
+                .Where(candidate => string.Equals(candidate.DisplayName, selectedName, StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .ToArray();
 
-    private static IEnumerable<CaptureSourceCandidate> EnumerateCandidates()
-    {
-        foreach (var display in EnumerateDisplays())
-        {
-            yield return display;
+            if (namedMatches.Length > 0)
+            {
+                return namedMatches;
+            }
         }
 
-        foreach (var window in EnumerateWindows())
-        {
-            yield return window;
-        }
+        return sizeMatches.Take(2).ToArray();
     }
 
     private static IEnumerable<CaptureSourceCandidate> EnumerateDisplays()
@@ -190,21 +136,25 @@ public sealed class GraphicsCaptureSourceResolver
                 var titleBuilder = new StringBuilder(titleLength + 1);
                 NativeMethods.GetWindowText(windowHandle, titleBuilder, titleBuilder.Capacity);
 
-                try
+                if (!NativeMethods.GetWindowRect(windowHandle, out var windowRect))
                 {
-                    var item = GraphicsCaptureItemInterop.CreateForWindow(windowHandle);
-                    windows.Add(
-                        new CaptureSourceCandidate(
-                            CaptureSourceKind.Window,
-                            windowHandle,
-                            titleBuilder.ToString(),
-                            item.Size.Width,
-                            item.Size.Height));
+                    return true;
                 }
-                catch
+
+                var width = Math.Max(0, windowRect.Right - windowRect.Left);
+                var height = Math.Max(0, windowRect.Bottom - windowRect.Top);
+                if (width == 0 || height == 0)
                 {
-                    // Skip windows that Windows.Graphics.Capture will not accept.
+                    return true;
                 }
+
+                windows.Add(
+                    new CaptureSourceCandidate(
+                        CaptureSourceKind.Window,
+                        windowHandle,
+                        titleBuilder.ToString(),
+                        width,
+                        height));
 
                 return true;
             },
@@ -231,3 +181,4 @@ public sealed class GraphicsCaptureSourceResolver
         }
     }
 }
+

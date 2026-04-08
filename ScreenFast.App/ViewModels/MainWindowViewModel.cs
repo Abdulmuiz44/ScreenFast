@@ -10,7 +10,7 @@ using DataTransfer = Windows.ApplicationModel.DataTransfer;
 
 namespace ScreenFast.App.ViewModels;
 
-public sealed class MainWindowViewModel : ObservableObject
+public sealed class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly IRecorderOrchestrator _orchestrator;
     private readonly IRecordingHistoryService _historyService;
@@ -19,18 +19,22 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly IAppPreferencesService _preferencesService;
     private readonly IRecoveryService _recoveryService;
     private readonly IDiagnosticsExportService _diagnosticsExportService;
+    private readonly IAppSmokeCheckService _smokeCheckService;
     private readonly DispatcherQueue? _dispatcherQueue;
     private readonly IReadOnlyList<VideoQualityPresetOption> _qualityPresets;
     private readonly IReadOnlyList<PostRecordingOpenBehaviorOption> _postRecordingBehaviors;
+    private readonly IReadOnlyList<CountdownOptionViewModel> _countdownOptions;
     private readonly IReadOnlyList<HotkeyModifierOption> _hotkeyModifiers;
     private readonly IReadOnlyList<HotkeyKeyOption> _hotkeyKeys;
 
     private RecorderStatusSnapshot _snapshot;
     private bool _includeSystemAudio;
     private bool _includeMicrophone;
+    private bool _overlayEnabled;
     private string? _shellMessage;
     private VideoQualityPresetOption? _selectedQualityPreset;
     private PostRecordingOpenBehaviorOption? _selectedPostRecordingBehavior;
+    private CountdownOptionViewModel? _selectedCountdownOption;
     private bool _launchMinimizedToTray;
     private bool _closeToTray;
     private bool _minimizeToTray;
@@ -43,6 +47,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private RecordingHistoryItemViewModel? _selectedRecentRecording;
     private bool _isOnboardingDismissed;
     private RecoveryNoticeModel? _recoveryNotice;
+    private SmokeCheckReport? _smokeCheckReport;
+    private bool _isDisposed;
     private nint _windowHandle;
 
     public MainWindowViewModel(
@@ -52,7 +58,8 @@ public sealed class MainWindowViewModel : ObservableObject
         IDesktopShellService desktopShellService,
         IAppPreferencesService preferencesService,
         IRecoveryService recoveryService,
-        IDiagnosticsExportService diagnosticsExportService)
+        IDiagnosticsExportService diagnosticsExportService,
+        IAppSmokeCheckService smokeCheckService)
     {
         _orchestrator = orchestrator;
         _historyService = historyService;
@@ -61,6 +68,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _preferencesService = preferencesService;
         _recoveryService = recoveryService;
         _diagnosticsExportService = diagnosticsExportService;
+        _smokeCheckService = smokeCheckService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _snapshot = orchestrator.Snapshot;
         _qualityPresets = VideoQualityPresets.All.Select(definition => new VideoQualityPresetOption(definition.Preset, definition.DisplayName)).ToArray();
@@ -70,6 +78,12 @@ public sealed class MainWindowViewModel : ObservableObject
             new(PostRecordingOpenBehavior.OpenFile, "Open Recording"),
             new(PostRecordingOpenBehavior.OpenContainingFolder, "Open Folder")
         ];
+        _countdownOptions =
+        [
+            new(RecordingCountdownOption.Off, "Off"),
+            new(RecordingCountdownOption.ThreeSeconds, "3 seconds"),
+            new(RecordingCountdownOption.FiveSeconds, "5 seconds")
+        ];
         _hotkeyModifiers = HotkeyModifierOption.CreateDefaults();
         _hotkeyKeys = HotkeyKeyOption.CreateDefaults();
         RecentRecordings = new ObservableCollection<RecordingHistoryItemViewModel>();
@@ -77,8 +91,10 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplySettings(_preferencesService.CurrentSettings);
         _includeSystemAudio = _snapshot.IncludeSystemAudio;
         _includeMicrophone = _snapshot.IncludeMicrophone;
+        _overlayEnabled = _snapshot.OverlayEnabled;
         _selectedQualityPreset = FindQualityPreset(_snapshot.QualityPreset);
         _selectedPostRecordingBehavior = FindPostRecordingBehavior(_snapshot.PostRecordingOpenBehavior);
+        _selectedCountdownOption = FindCountdownOption(_snapshot.CountdownOption);
         UpdateRecoveryNotice(_recoveryService.CurrentInterruptedSession);
 
         SelectSourceCommand = new AsyncRelayCommand(() => _orchestrator.SelectSourceAsync(), () => CanSelectSource);
@@ -129,6 +145,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<RecordingHistoryItemViewModel> RecentRecordings { get; }
     public IReadOnlyList<VideoQualityPresetOption> QualityPresets => _qualityPresets;
     public IReadOnlyList<PostRecordingOpenBehaviorOption> PostRecordingBehaviors => _postRecordingBehaviors;
+    public IReadOnlyList<CountdownOptionViewModel> CountdownOptions => _countdownOptions;
     public IReadOnlyList<HotkeyModifierOption> HotkeyModifiers => _hotkeyModifiers;
     public IReadOnlyList<HotkeyKeyOption> HotkeyKeys => _hotkeyKeys;
 
@@ -158,6 +175,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public string ReadyOutputFolderText => string.IsNullOrWhiteSpace(_snapshot.OutputFolder)
         ? "Output folder missing"
         : (Directory.Exists(_snapshot.OutputFolder) ? "Output folder available" : "Output folder unavailable");
+    public bool IsCountdownVisible => _snapshot.CountdownRemainingSeconds > 0;
+    public string CountdownText => IsCountdownVisible ? $"Starting in {_snapshot.CountdownRemainingSeconds}..." : string.Empty;
+    public string DiskSpaceWarningText => _snapshot.PreflightWarningMessage ?? string.Empty;
+    public bool HasDiskSpaceWarning => !string.IsNullOrWhiteSpace(_snapshot.PreflightWarningMessage);
     public bool IsRecoveryNoticeVisible => _recoveryNotice is not null;
     public bool CanOpenRecoveryFolder => !string.IsNullOrWhiteSpace(_recoveryNotice?.TargetFilePath);
     public bool CanCopyRecoveryPath => !string.IsNullOrWhiteSpace(_recoveryNotice?.TargetFilePath);
@@ -201,6 +222,32 @@ public sealed class MainWindowViewModel : ObservableObject
         : "No recordings yet. Finished recordings will appear here.";
 
     public bool HasRecentRecordings => RecentRecordings.Count > 0;
+    public bool HasSmokeCheckIssues => _smokeCheckReport?.HasIssues == true;
+    public bool HasSmokeCheckDetails => !string.IsNullOrWhiteSpace(SmokeCheckDetailsText);
+    public string SmokeCheckSummaryText
+    {
+        get
+        {
+            if (_smokeCheckReport is null)
+            {
+                return "Startup checks have not run yet.";
+            }
+
+            return _smokeCheckReport.HighestSeverity switch
+            {
+                SmokeCheckSeverity.Error => $"Startup checks found {_smokeCheckReport.ErrorCount} error(s) and {_smokeCheckReport.WarningCount} warning(s).",
+                SmokeCheckSeverity.Warning => $"Startup checks found {_smokeCheckReport.WarningCount} warning(s).",
+                _ => "Startup checks passed."
+            };
+        }
+    }
+
+    public string SmokeCheckDetailsText => _smokeCheckReport is null
+        ? string.Empty
+        : string.Join("  | ", _smokeCheckReport.Items
+            .Where(item => item.Severity != SmokeCheckSeverity.Ok)
+            .Select(item => $"{item.Name}: {item.Message}")
+            .Take(3));
 
     public bool IncludeSystemAudio
     {
@@ -230,6 +277,19 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool OverlayEnabled
+    {
+        get => _overlayEnabled;
+        set
+        {
+            if (SetProperty(ref _overlayEnabled, value))
+            {
+                _orchestrator.UpdatePolishPreferences(SelectedCountdownOption?.Option ?? RecordingCountdownOption.Off, _overlayEnabled);
+                _ = SavePreferencesAsync();
+            }
+        }
+    }
+
     public VideoQualityPresetOption? SelectedQualityPreset
     {
         get => _selectedQualityPreset;
@@ -251,6 +311,19 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _selectedPostRecordingBehavior, value) && value is not null)
             {
                 _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone, value.Behavior);
+                _ = SavePreferencesAsync();
+            }
+        }
+    }
+
+    public CountdownOptionViewModel? SelectedCountdownOption
+    {
+        get => _selectedCountdownOption;
+        set
+        {
+            if (SetProperty(ref _selectedCountdownOption, value) && value is not null)
+            {
+                _orchestrator.UpdatePolishPreferences(value.Option, _overlayEnabled);
                 _ = SavePreferencesAsync();
             }
         }
@@ -292,47 +365,18 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    public HotkeyModifierOption? StartHotkeyModifier
-    {
-        get => _startHotkeyModifier;
-        set => SetProperty(ref _startHotkeyModifier, value);
-    }
+    public HotkeyModifierOption? StartHotkeyModifier { get => _startHotkeyModifier; set => SetProperty(ref _startHotkeyModifier, value); }
+    public HotkeyModifierOption? StopHotkeyModifier { get => _stopHotkeyModifier; set => SetProperty(ref _stopHotkeyModifier, value); }
+    public HotkeyModifierOption? PauseHotkeyModifier { get => _pauseHotkeyModifier; set => SetProperty(ref _pauseHotkeyModifier, value); }
+    public HotkeyKeyOption? StartHotkeyKey { get => _startHotkeyKey; set => SetProperty(ref _startHotkeyKey, value); }
+    public HotkeyKeyOption? StopHotkeyKey { get => _stopHotkeyKey; set => SetProperty(ref _stopHotkeyKey, value); }
+    public HotkeyKeyOption? PauseHotkeyKey { get => _pauseHotkeyKey; set => SetProperty(ref _pauseHotkeyKey, value); }
 
-    public HotkeyModifierOption? StopHotkeyModifier
-    {
-        get => _stopHotkeyModifier;
-        set => SetProperty(ref _stopHotkeyModifier, value);
-    }
-
-    public HotkeyModifierOption? PauseHotkeyModifier
-    {
-        get => _pauseHotkeyModifier;
-        set => SetProperty(ref _pauseHotkeyModifier, value);
-    }
-
-    public HotkeyKeyOption? StartHotkeyKey
-    {
-        get => _startHotkeyKey;
-        set => SetProperty(ref _startHotkeyKey, value);
-    }
-
-    public HotkeyKeyOption? StopHotkeyKey
-    {
-        get => _stopHotkeyKey;
-        set => SetProperty(ref _stopHotkeyKey, value);
-    }
-
-    public HotkeyKeyOption? PauseHotkeyKey
-    {
-        get => _pauseHotkeyKey;
-        set => SetProperty(ref _pauseHotkeyKey, value);
-    }
-
-    public bool CanSelectSource => _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
-    public bool CanPickOutputFolder => _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
-    public bool CanRecord => _snapshot.State == RecorderState.Ready && IsSourceReady && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
+    public bool CanSelectSource => !IsCountdownVisible && _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
+    public bool CanPickOutputFolder => !IsCountdownVisible && _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
+    public bool CanRecord => !IsCountdownVisible && _snapshot.State == RecorderState.Ready && IsSourceReady && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
     public bool CanPauseResume => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
-    public bool CanStop => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
+    public bool CanStop => IsCountdownVisible || _snapshot.State is RecorderState.Recording or RecorderState.Paused;
 
     private bool IsSourceReady => _snapshot.SelectedSource is not null && _snapshot.SelectedSource.Width > 0 && _snapshot.SelectedSource.Height > 0;
 
@@ -348,9 +392,12 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplySettings(_preferencesService.CurrentSettings);
         _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone, SelectedPostRecordingBehavior?.Behavior ?? PostRecordingOpenBehavior.None);
         _orchestrator.UpdateQualityPreset(SelectedQualityPreset?.Preset ?? VideoQualityPreset.Standard);
+        _orchestrator.UpdatePolishPreferences(SelectedCountdownOption?.Option ?? RecordingCountdownOption.Off, _overlayEnabled);
 
         await _historyService.RefreshAvailabilityAsync(cancellationToken);
         await ReloadHistoryAsync(cancellationToken);
+        _smokeCheckReport = await _smokeCheckService.RunAsync(_windowHandle, cancellationToken);
+        RaiseSmokeCheckProperties();
         UpdateRecoveryNotice(_recoveryService.CurrentInterruptedSession);
     }
 
@@ -424,6 +471,8 @@ public sealed class MainWindowViewModel : ObservableObject
             _includeMicrophone,
             SelectedQualityPreset?.Preset ?? VideoQualityPreset.Standard,
             SelectedPostRecordingBehavior?.Behavior ?? PostRecordingOpenBehavior.None,
+            SelectedCountdownOption?.Option ?? RecordingCountdownOption.Off,
+            _overlayEnabled,
             _isOnboardingDismissed);
 
         if (!result.IsSuccess)
@@ -434,6 +483,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void OnSnapshotChanged(object? sender, RecorderStatusSnapshot snapshot)
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         var shouldReloadHistory = ShouldReloadHistory(snapshot);
         if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
         {
@@ -488,8 +542,10 @@ public sealed class MainWindowViewModel : ObservableObject
         _snapshot = snapshot;
         _includeSystemAudio = snapshot.IncludeSystemAudio;
         _includeMicrophone = snapshot.IncludeMicrophone;
+        _overlayEnabled = snapshot.OverlayEnabled;
         _selectedQualityPreset = FindQualityPreset(snapshot.QualityPreset);
         _selectedPostRecordingBehavior = FindPostRecordingBehavior(snapshot.PostRecordingOpenBehavior);
+        _selectedCountdownOption = FindCountdownOption(snapshot.CountdownOption);
 
         if (snapshot.State == RecorderState.Recording && !_isOnboardingDismissed)
         {
@@ -504,8 +560,10 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         _includeSystemAudio = settings.IncludeSystemAudio;
         _includeMicrophone = settings.IncludeMicrophone;
+        _overlayEnabled = settings.OverlayEnabled;
         _selectedQualityPreset = FindQualityPreset(settings.QualityPreset);
         _selectedPostRecordingBehavior = FindPostRecordingBehavior(settings.PostRecordingOpenBehavior);
+        _selectedCountdownOption = FindCountdownOption(settings.CountdownOption);
         _launchMinimizedToTray = settings.LaunchMinimizedToTray;
         _closeToTray = settings.CloseToTray;
         _minimizeToTray = settings.MinimizeToTray;
@@ -521,6 +579,8 @@ public sealed class MainWindowViewModel : ObservableObject
         RaiseAllStateProperties();
         RaisePropertyChanged(nameof(SelectedQualityPreset));
         RaisePropertyChanged(nameof(SelectedPostRecordingBehavior));
+        RaisePropertyChanged(nameof(SelectedCountdownOption));
+        RaisePropertyChanged(nameof(OverlayEnabled));
         RaisePropertyChanged(nameof(LaunchMinimizedToTray));
         RaisePropertyChanged(nameof(CloseToTray));
         RaisePropertyChanged(nameof(MinimizeToTray));
@@ -752,6 +812,11 @@ public sealed class MainWindowViewModel : ObservableObject
         return _postRecordingBehaviors.First(option => option.Behavior == behavior);
     }
 
+    private CountdownOptionViewModel FindCountdownOption(RecordingCountdownOption option)
+    {
+        return _countdownOptions.First(x => x.Option == option);
+    }
+
     private HotkeyModifierOption FindModifier(HotkeyGesture gesture)
     {
         return _hotkeyModifiers.FirstOrDefault(option => option.Matches(gesture)) ?? _hotkeyModifiers[0];
@@ -771,6 +836,14 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshCommands();
     }
 
+    private void RaiseSmokeCheckProperties()
+    {
+        RaisePropertyChanged(nameof(HasSmokeCheckIssues));
+        RaisePropertyChanged(nameof(HasSmokeCheckDetails));
+        RaisePropertyChanged(nameof(SmokeCheckSummaryText));
+        RaisePropertyChanged(nameof(SmokeCheckDetailsText));
+    }
+
     private void RaiseAllStateProperties()
     {
         RaisePropertyChanged(nameof(StatusText));
@@ -787,7 +860,13 @@ public sealed class MainWindowViewModel : ObservableObject
         RaisePropertyChanged(nameof(AudioChoicesSummary));
         RaisePropertyChanged(nameof(IncludeSystemAudio));
         RaisePropertyChanged(nameof(IncludeMicrophone));
+        RaisePropertyChanged(nameof(OverlayEnabled));
         RaisePropertyChanged(nameof(IsOnboardingVisible));
+        RaisePropertyChanged(nameof(IsCountdownVisible));
+        RaisePropertyChanged(nameof(CountdownText));
+        RaisePropertyChanged(nameof(HasDiskSpaceWarning));
+        RaisePropertyChanged(nameof(DiskSpaceWarningText));
+        RaiseSmokeCheckProperties();
         RaisePropertyChanged(nameof(CanSelectSource));
         RaisePropertyChanged(nameof(CanPickOutputFolder));
         RaisePropertyChanged(nameof(CanRecord));
@@ -797,8 +876,26 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshCommands();
     }
 
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        _orchestrator.SnapshotChanged -= OnSnapshotChanged;
+        _preferencesService.SettingsChanged -= OnSettingsChanged;
+        _recoveryService.RecoveryStateChanged -= OnRecoveryStateChanged;
+    }
     private void RefreshCommands()
     {
+        if (SelectSourceCommand is null)
+        {
+            return;
+        }
+
         SelectSourceCommand.NotifyCanExecuteChanged();
         PickOutputFolderCommand.NotifyCanExecuteChanged();
         RecordCommand.NotifyCanExecuteChanged();
@@ -822,8 +919,8 @@ public sealed class MainWindowViewModel : ObservableObject
 }
 
 public sealed record VideoQualityPresetOption(VideoQualityPreset Preset, string Label);
-
 public sealed record PostRecordingOpenBehaviorOption(PostRecordingOpenBehavior Behavior, string Label);
+public sealed record CountdownOptionViewModel(RecordingCountdownOption Option, string Label);
 
 public sealed record HotkeyModifierOption(string Label, bool Control, bool Shift, bool Alt)
 {
@@ -850,3 +947,11 @@ public sealed record HotkeyKeyOption(int VirtualKey, string Label)
             .Select(index => new HotkeyKeyOption(0x6F + index, $"F{index}"))
             .ToArray();
 }
+
+
+
+
+
+
+
+

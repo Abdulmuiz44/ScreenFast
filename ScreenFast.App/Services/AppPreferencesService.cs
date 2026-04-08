@@ -4,7 +4,7 @@ using ScreenFast.Core.Results;
 
 namespace ScreenFast.App.Services;
 
-public sealed class AppPreferencesService : IAppPreferencesService
+public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
 {
     private readonly IAppSettingsStore _settingsStore;
     private readonly IRecorderOrchestrator _recorderOrchestrator;
@@ -13,6 +13,7 @@ public sealed class AppPreferencesService : IAppPreferencesService
     private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     private bool _isInitialized;
+    private bool _isDisposed;
 
     public AppPreferencesService(
         IAppSettingsStore settingsStore,
@@ -33,7 +34,7 @@ public sealed class AppPreferencesService : IAppPreferencesService
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        if (_isInitialized)
+        if (_isInitialized || _isDisposed)
         {
             return;
         }
@@ -84,10 +85,7 @@ public sealed class AppPreferencesService : IAppPreferencesService
         }
 
         CurrentSettings = settings;
-        _recorderOrchestrator.ApplyPersistedSettings(
-            settings,
-            restoredSource,
-            messages.Count == 0 ? null : string.Join(" ", messages));
+        _recorderOrchestrator.ApplyPersistedSettings(settings, restoredSource, messages.Count == 0 ? null : string.Join(" ", messages));
 
         _recorderOrchestrator.SnapshotChanged += OnSnapshotChanged;
         _isInitialized = true;
@@ -140,6 +138,8 @@ public sealed class AppPreferencesService : IAppPreferencesService
         bool includeMicrophone,
         VideoQualityPreset qualityPreset,
         PostRecordingOpenBehavior postRecordingOpenBehavior,
+        RecordingCountdownOption countdownOption,
+        bool overlayEnabled,
         bool isOnboardingDismissed,
         CancellationToken cancellationToken = default)
     {
@@ -149,6 +149,8 @@ public sealed class AppPreferencesService : IAppPreferencesService
             IncludeMicrophone = includeMicrophone,
             QualityPreset = qualityPreset,
             PostRecordingOpenBehavior = postRecordingOpenBehavior,
+            CountdownOption = countdownOption,
+            OverlayEnabled = overlayEnabled,
             IsOnboardingDismissed = isOnboardingDismissed
         };
 
@@ -162,6 +164,8 @@ public sealed class AppPreferencesService : IAppPreferencesService
                 ["includeMicrophone"] = includeMicrophone,
                 ["qualityPreset"] = qualityPreset,
                 ["postRecordingOpenBehavior"] = postRecordingOpenBehavior,
+                ["countdownOption"] = countdownOption,
+                ["overlayEnabled"] = overlayEnabled,
                 ["isOnboardingDismissed"] = isOnboardingDismissed
             });
         return await PersistAsync(CurrentSettings, cancellationToken);
@@ -182,9 +186,21 @@ public sealed class AppPreferencesService : IAppPreferencesService
         return await PersistAsync(CurrentSettings, cancellationToken);
     }
 
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        _recorderOrchestrator.SnapshotChanged -= OnSnapshotChanged;
+        _saveGate.Dispose();
+    }
+
     private void OnSnapshotChanged(object? sender, RecorderStatusSnapshot snapshot)
     {
-        if (!_isInitialized)
+        if (!_isInitialized || _isDisposed)
         {
             return;
         }
@@ -196,6 +212,8 @@ public sealed class AppPreferencesService : IAppPreferencesService
             IncludeMicrophone = snapshot.IncludeMicrophone,
             QualityPreset = snapshot.QualityPreset,
             PostRecordingOpenBehavior = snapshot.PostRecordingOpenBehavior,
+            CountdownOption = snapshot.CountdownOption,
+            OverlayEnabled = snapshot.OverlayEnabled,
             LastSelectedSource = snapshot.SelectedSource
         };
 
@@ -205,6 +223,11 @@ public sealed class AppPreferencesService : IAppPreferencesService
 
     private async Task<OperationResult> PersistAsync(AppSettings settings, CancellationToken cancellationToken)
     {
+        if (_isDisposed)
+        {
+            return OperationResult.Success();
+        }
+
         await _saveGate.WaitAsync(cancellationToken);
         try
         {

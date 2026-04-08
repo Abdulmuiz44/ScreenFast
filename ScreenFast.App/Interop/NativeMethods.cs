@@ -5,6 +5,7 @@ namespace ScreenFast.App.Interop;
 internal static class NativeMethods
 {
     internal const int GwlpWndProc = -4;
+    internal const int GwlExStyle = -20;
     internal const uint WmSize = 0x0005;
     internal const uint WmClose = 0x0010;
     internal const uint WmHotKey = 0x0312;
@@ -14,6 +15,12 @@ internal static class NativeMethods
     internal const uint ModShift = 0x0004;
     internal const int SwHide = 0;
     internal const int SwRestore = 9;
+    internal const int WsExToolWindow = 0x00000080;
+    internal const int WsExNoActivate = 0x08000000;
+    internal const uint SwpNoSize = 0x0001;
+    internal const uint SwpNoMove = 0x0002;
+    internal const uint SwpNoActivate = 0x0010;
+    internal static readonly nint HwndTopMost = new(-1);
 
     internal delegate nint WindowProcedure(nint hwnd, uint message, nint wParam, nint lParam);
 
@@ -44,11 +51,14 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool SetForegroundWindow(nint hWnd);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
     internal static nint SetWindowLongPtr(nint hWnd, int nIndex, nint newLong)
     {
         return IntPtr.Size == 8
             ? SetWindowLongPtr64(hWnd, nIndex, newLong)
-            : new(SetWindowLong32(hWnd, nIndex, newLong));
+            : new(SetWindowLong32(hWnd, nIndex, (int)newLong));
     }
 
     internal static nint GetWindowLongPtr(nint hWnd, int nIndex)

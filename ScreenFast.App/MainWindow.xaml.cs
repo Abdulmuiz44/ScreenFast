@@ -12,9 +12,9 @@ public sealed partial class MainWindow : Microsoft.UI.Xaml.Window
 
     public MainWindow(MainWindowViewModel viewModel, IDesktopShellService desktopShellService, IRecordingIndicatorOverlayService overlayService)
     {
+        ViewModel = viewModel;
         InitializeComponent();
         Title = "ScreenFast";
-        ViewModel = viewModel;
         _desktopShellService = desktopShellService;
         _overlayService = overlayService;
         _desktopShellService.MessageChanged += OnShellMessageChanged;

@@ -11,7 +11,11 @@ public sealed record RecorderStatusSnapshot(
     bool IncludeSystemAudio,
     bool IncludeMicrophone,
     VideoQualityPreset QualityPreset,
-    PostRecordingOpenBehavior PostRecordingOpenBehavior)
+    PostRecordingOpenBehavior PostRecordingOpenBehavior,
+    RecordingCountdownOption CountdownOption,
+    bool OverlayEnabled,
+    int CountdownRemainingSeconds,
+    string? PreflightWarningMessage)
 {
     public static RecorderStatusSnapshot CreateDefault() =>
         new(
@@ -23,5 +27,9 @@ public sealed record RecorderStatusSnapshot(
             false,
             false,
             VideoQualityPreset.Standard,
-            PostRecordingOpenBehavior.None);
+            PostRecordingOpenBehavior.None,
+            RecordingCountdownOption.Off,
+            true,
+            0,
+            null);
 }

@@ -20,9 +20,8 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
     public RecordingHistoryService(IScreenFastLogService logService)
     {
         _logService = logService;
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ScreenFast");
-        Directory.CreateDirectory(root);
-        _historyPath = Path.Combine(root, "recording-history.json");
+        Directory.CreateDirectory(ScreenFastPaths.RootFolderPath);
+        _historyPath = ScreenFastPaths.HistoryFilePath;
     }
 
     public async Task<IReadOnlyList<RecordingHistoryEntry>> GetRecentAsync(CancellationToken cancellationToken = default)
