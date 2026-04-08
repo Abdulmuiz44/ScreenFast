@@ -16,6 +16,8 @@ public interface IRecorderOrchestrator
 
     void UpdateQualityPreset(VideoQualityPreset preset);
 
+    void UpdatePolishPreferences(RecordingCountdownOption countdownOption, bool overlayEnabled);
+
     void PublishUserMessage(string message);
 
     Task SelectSourceAsync(CancellationToken cancellationToken = default);

@@ -18,10 +18,8 @@ public sealed class JsonAppSettingsStore : IAppSettingsStore
 
     public JsonAppSettingsStore()
     {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ScreenFast");
-        _settingsPath = Path.Combine(root, "settings.json");
+        Directory.CreateDirectory(ScreenFastPaths.RootFolderPath);
+        _settingsPath = ScreenFastPaths.SettingsFilePath;
     }
 
     public async Task<AppSettingsLoadResult> LoadAsync(CancellationToken cancellationToken = default)
@@ -37,24 +35,15 @@ public sealed class JsonAppSettingsStore : IAppSettingsStore
             var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, SerializerOptions, cancellationToken);
             if (settings is null)
             {
-                return new AppSettingsLoadResult(
-                    AppSettings.CreateDefault(),
-                    "Saved settings were empty, so ScreenFast started with defaults.");
+                return new AppSettingsLoadResult(AppSettings.CreateDefault(), "ScreenFast could not read the saved settings file, so defaults were restored.");
             }
 
-            return new AppSettingsLoadResult(Normalize(settings), null);
+            settings = Normalize(settings);
+            return new AppSettingsLoadResult(settings, null);
         }
-        catch (JsonException)
+        catch
         {
-            return new AppSettingsLoadResult(
-                AppSettings.CreateDefault(),
-                "Saved settings could not be read, so ScreenFast started with defaults.");
-        }
-        catch (Exception)
-        {
-            return new AppSettingsLoadResult(
-                AppSettings.CreateDefault(),
-                "ScreenFast could not read saved settings, so defaults were used.");
+            return new AppSettingsLoadResult(AppSettings.CreateDefault(), "ScreenFast could not load the saved settings file, so defaults were restored.");
         }
     }
 
@@ -62,31 +51,43 @@ public sealed class JsonAppSettingsStore : IAppSettingsStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
-            await using var stream = File.Create(_settingsPath);
-            await JsonSerializer.SerializeAsync(stream, Normalize(settings), SerializerOptions, cancellationToken);
-            await stream.FlushAsync(cancellationToken);
+            var tempPath = _settingsPath + ".tmp";
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, Normalize(settings), SerializerOptions, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            File.Move(tempPath, _settingsPath, true);
             return OperationResult.Success();
         }
         catch (Exception ex)
         {
-            return OperationResult.Failure(AppError.RecordingFailed($"ScreenFast could not save settings: {ex.Message}"));
+            return OperationResult.Failure(AppError.ShellActionFailed($"ScreenFast could not save settings: {ex.Message}"));
         }
     }
 
     private static AppSettings Normalize(AppSettings settings)
     {
+        var qualityPreset = Enum.IsDefined(typeof(VideoQualityPreset), settings.QualityPreset)
+            ? settings.QualityPreset
+            : VideoQualityPreset.Standard;
+        var postRecordingBehavior = Enum.IsDefined(typeof(PostRecordingOpenBehavior), settings.PostRecordingOpenBehavior)
+            ? settings.PostRecordingOpenBehavior
+            : PostRecordingOpenBehavior.None;
+        var countdownOption = Enum.IsDefined(typeof(RecordingCountdownOption), settings.CountdownOption)
+            ? settings.CountdownOption
+            : RecordingCountdownOption.Off;
+        var overlayEnabled = settings.Version < 2 ? true : settings.OverlayEnabled;
+
         return settings with
         {
-            Version = settings.Version <= 0 ? 1 : settings.Version,
-            QualityPreset = Enum.IsDefined(settings.QualityPreset) ? settings.QualityPreset : VideoQualityPreset.Standard,
-            Hotkeys = settings.Hotkeys ?? HotkeySettings.CreateDefault(),
-            PostRecordingOpenBehavior = Enum.IsDefined(settings.PostRecordingOpenBehavior)
-                ? settings.PostRecordingOpenBehavior
-                : PostRecordingOpenBehavior.None,
-            DismissedRecoverySessionId = string.IsNullOrWhiteSpace(settings.DismissedRecoverySessionId)
-                ? null
-                : settings.DismissedRecoverySessionId
+            Version = Math.Max(settings.Version, 2),
+            QualityPreset = qualityPreset,
+            PostRecordingOpenBehavior = postRecordingBehavior,
+            CountdownOption = countdownOption,
+            OverlayEnabled = overlayEnabled,
+            DismissedRecoverySessionId = string.IsNullOrWhiteSpace(settings.DismissedRecoverySessionId) ? null : settings.DismissedRecoverySessionId
         };
     }
 }

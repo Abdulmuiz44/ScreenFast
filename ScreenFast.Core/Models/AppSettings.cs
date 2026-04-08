@@ -13,11 +13,13 @@ public sealed record AppSettings(
     PostRecordingOpenBehavior PostRecordingOpenBehavior,
     bool IsOnboardingDismissed,
     string? DismissedRecoverySessionId,
+    RecordingCountdownOption CountdownOption,
+    bool OverlayEnabled,
     CaptureSourceModel? LastSelectedSource)
 {
     public static AppSettings CreateDefault() =>
         new(
-            1,
+            2,
             null,
             false,
             false,
@@ -29,5 +31,7 @@ public sealed record AppSettings(
             PostRecordingOpenBehavior.None,
             false,
             null,
+            RecordingCountdownOption.Off,
+            true,
             null);
 }

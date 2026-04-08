@@ -29,13 +29,11 @@ public sealed class FileScreenFastLogService : IScreenFastLogService, IDisposabl
     private readonly ConcurrentQueue<Exception> _internalFailures = new();
     private int _queuedCount;
     private string? _currentFilePath;
+    private bool _isDisposed;
 
     public FileScreenFastLogService()
     {
-        LogsFolderPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ScreenFast",
-            "Logs");
+        LogsFolderPath = ScreenFastPaths.LogsFolderPath;
         Directory.CreateDirectory(LogsFolderPath);
         _processorTask = Task.Run(ProcessAsync);
     }
@@ -82,21 +80,39 @@ public sealed class FileScreenFastLogService : IScreenFastLogService, IDisposabl
 
     public void Dispose()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
         _channel.Writer.TryComplete();
-        _shutdown.Cancel();
+
         try
         {
-            _processorTask.GetAwaiter().GetResult();
+            if (!_processorTask.Wait(TimeSpan.FromSeconds(2)))
+            {
+                _shutdown.Cancel();
+                _processorTask.Wait(TimeSpan.FromSeconds(2));
+            }
         }
         catch
         {
         }
-
-        _shutdown.Dispose();
+        finally
+        {
+            _shutdown.Cancel();
+            _shutdown.Dispose();
+        }
     }
 
     private void Enqueue(ScreenFastLogLevel level, string eventName, string message, IReadOnlyDictionary<string, object?>? properties)
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         try
         {
             Interlocked.Increment(ref _queuedCount);

@@ -20,6 +20,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICaptureItemResolver, GraphicsCaptureItemResolver>();
         services.AddSingleton<ICaptureSessionFactory, GraphicsCaptureSessionFactory>();
         services.AddSingleton<IOutputFolderPickerService, OutputFolderPickerService>();
+        services.AddSingleton<IRecordingFileNameService, RecordingFileNameService>();
         services.AddSingleton<IAppSettingsStore, JsonAppSettingsStore>();
         services.AddSingleton<IRecoveryStateStore, JsonRecoveryStateStore>();
         services.AddSingleton<IRecoveryService, RecoveryService>();
@@ -32,7 +33,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAppPreferencesService, AppPreferencesService>();
         services.AddSingleton<IFileLauncherService, FileLauncherService>();
         services.AddSingleton<IDesktopShellService, DesktopShellService>();
+        services.AddSingleton<IRecordingIndicatorOverlayService, RecordingIndicatorOverlayService>();
         services.AddSingleton<IDiagnosticsExportService, DiagnosticsExportService>();
+        services.AddSingleton<IAppSmokeCheckService, AppSmokeCheckService>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<MainWindow>();
 

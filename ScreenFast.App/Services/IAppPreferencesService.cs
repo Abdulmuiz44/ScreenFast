@@ -20,6 +20,8 @@ public interface IAppPreferencesService
         bool includeMicrophone,
         VideoQualityPreset qualityPreset,
         PostRecordingOpenBehavior postRecordingOpenBehavior,
+        RecordingCountdownOption countdownOption,
+        bool overlayEnabled,
         bool isOnboardingDismissed,
         CancellationToken cancellationToken = default);
 

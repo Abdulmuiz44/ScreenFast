@@ -176,10 +176,10 @@ public sealed class DesktopShellService : IDesktopShellService
         }
 
         _snapshot = snapshot;
-        _startMenuItem.Enabled = snapshot.State == RecorderState.Ready;
+        _startMenuItem.Enabled = snapshot.State == RecorderState.Ready && snapshot.CountdownRemainingSeconds == 0;
         _pauseResumeMenuItem.Enabled = snapshot.State is RecorderState.Recording or RecorderState.Paused;
         _pauseResumeMenuItem.Text = snapshot.State == RecorderState.Paused ? "Resume Recording" : "Pause Recording";
-        _stopMenuItem.Enabled = snapshot.State is RecorderState.Recording or RecorderState.Paused;
+        _stopMenuItem.Enabled = snapshot.CountdownRemainingSeconds > 0 || snapshot.State is RecorderState.Recording or RecorderState.Paused;
         _notifyIcon.Text = BuildTrayText(snapshot);
     }
 
@@ -402,7 +402,7 @@ public sealed class DesktopShellService : IDesktopShellService
 
     private static string BuildTrayText(RecorderStatusSnapshot snapshot)
     {
-        var text = $"ScreenFast: {snapshot.State}";
+        var text = snapshot.CountdownRemainingSeconds > 0 ? $"ScreenFast: Countdown {snapshot.CountdownRemainingSeconds}" : $"ScreenFast: {snapshot.State}";
         return text.Length <= 63 ? text : text[..63];
     }
 }

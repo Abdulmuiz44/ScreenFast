@@ -17,11 +17,8 @@ public sealed class JsonRecoveryStateStore : IRecoveryStateStore
 
     public JsonRecoveryStateStore()
     {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ScreenFast");
-        Directory.CreateDirectory(root);
-        _recoveryPath = Path.Combine(root, "active-session.json");
+        Directory.CreateDirectory(ScreenFastPaths.RootFolderPath);
+        _recoveryPath = ScreenFastPaths.RecoveryStateFilePath;
     }
 
     public async Task<RecoverySessionMarker?> LoadAsync(CancellationToken cancellationToken = default)

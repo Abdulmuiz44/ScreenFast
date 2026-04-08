@@ -54,6 +54,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             new Dictionary<string, object?>
             {
                 ["outputFolder"] = request.OutputFolder,
+                ["outputFilePath"] = request.OutputFilePath,
                 ["qualityPreset"] = request.QualityPreset,
                 ["includeSystemAudio"] = request.IncludeSystemAudio,
                 ["includeMicrophone"] = request.IncludeMicrophone,
@@ -87,7 +88,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         }
 
         _captureSession = captureSessionResult.Value;
-        _outputPath = BuildOutputPath(request.OutputFolder);
+        _outputPath = request.OutputFilePath;
 
         var includeSystemAudio = request.IncludeSystemAudio;
         var includeMicrophone = request.IncludeMicrophone;
@@ -476,11 +477,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         _totalPausedDurationHundredsOfNanoseconds = 0;
     }
 
-    private static string BuildOutputPath(string outputFolder)
-    {
-        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        return Path.Combine(outputFolder, $"ScreenFast-{timestamp}.mp4");
-    }
+
 
     private static long ConvertStopwatchTicksToHundredsOfNanoseconds(long stopwatchTicks)
     {
