@@ -53,10 +53,10 @@ internal static class MediaFoundationNative
     [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFCreateMemoryBuffer(uint maxLength, out IMFMediaBuffer buffer);
 
-    [DllImport("mfapi.dll", ExactSpelling = true)]
+    [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFSetAttributeSize(IMFAttributes attributes, in Guid key, uint width, uint height);
 
-    [DllImport("mfapi.dll", ExactSpelling = true)]
+    [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFSetAttributeRatio(IMFAttributes attributes, in Guid key, uint numerator, uint denominator);
 
     [DllImport("mf.dll", ExactSpelling = true)]
