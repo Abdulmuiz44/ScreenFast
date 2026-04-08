@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+using System.Collections.Concurrent;
+using System.Globalization;
 using ScreenFast.Capture.Interop;
 using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Models;
@@ -9,12 +10,29 @@ namespace ScreenFast.Capture.Services;
 
 public sealed class GraphicsCaptureItemResolver : ICaptureItemResolver
 {
+    private readonly ConcurrentDictionary<string, GraphicsCaptureItem> _cachedItems = new(StringComparer.OrdinalIgnoreCase);
+
+    public void Remember(CaptureSourceModel source, GraphicsCaptureItem item)
+    {
+        if (string.IsNullOrWhiteSpace(source.SourceId))
+        {
+            return;
+        }
+
+        _cachedItems[source.SourceId] = item;
+    }
+
     public OperationResult<GraphicsCaptureItem> Resolve(CaptureSourceModel source)
     {
         if (string.IsNullOrWhiteSpace(source.SourceId))
         {
             return OperationResult<GraphicsCaptureItem>.Failure(
                 AppError.SourceUnavailable("The selected source is missing an identifier. Select the source again."));
+        }
+
+        if (_cachedItems.TryGetValue(source.SourceId, out var cachedItem))
+        {
+            return OperationResult<GraphicsCaptureItem>.Success(cachedItem);
         }
 
         if (!TryParseHandle(source.SourceId, out var prefix, out var handle))
@@ -32,12 +50,13 @@ public sealed class GraphicsCaptureItemResolver : ICaptureItemResolver
                 _ => throw new InvalidOperationException()
             };
 
+            _cachedItems[source.SourceId] = item;
             return OperationResult<GraphicsCaptureItem>.Success(item);
         }
         catch
         {
             return OperationResult<GraphicsCaptureItem>.Failure(
-                AppError.SourceUnavailable("The selected source is no longer available. Select the display or window again."));
+                AppError.SourceUnavailable("The selected source is no longer available. Select the source again."));
         }
     }
 
