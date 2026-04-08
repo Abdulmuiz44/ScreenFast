@@ -190,9 +190,16 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
 
                 if (frame.ContentSize.Width != _initialSize.Width || frame.ContentSize.Height != _initialSize.Height)
                 {
-                    _logService.Warning("capture.source_size_changed", "The capture source changed size during recording.");
-                    ReportRuntimeError(AppError.SourceSizeChanged());
-                    return;
+                    _logService.Info(
+                        "capture.source_size_changed",
+                        "The capture source changed size during recording. ScreenFast will keep using the original recording size.",
+                        new Dictionary<string, object?>
+                        {
+                            ["recordingWidth"] = _initialSize.Width,
+                            ["recordingHeight"] = _initialSize.Height,
+                            ["contentWidth"] = frame.ContentSize.Width,
+                            ["contentHeight"] = frame.ContentSize.Height
+                        });
                 }
 
                 if (_isPaused)
@@ -200,8 +207,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                     return;
                 }
 
-                var access = (IDirect3DDxgiInterfaceAccess)frame.Surface;
-                var texturePointer = access.GetInterface(Direct3D11Native.Id3D11Texture2DGuid);
+                var texturePointer = Direct3DSurfaceInterop.GetInterfacePointer(frame.Surface, Direct3D11Native.Id3D11Texture2DGuid);
 
                 try
                 {

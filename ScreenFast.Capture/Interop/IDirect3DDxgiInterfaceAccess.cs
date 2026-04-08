@@ -9,3 +9,12 @@ internal interface IDirect3DDxgiInterfaceAccess
 {
     nint GetInterface(in Guid iid);
 }
+
+internal static class Direct3DSurfaceInterop
+{
+    public static nint GetInterfacePointer(object surface, in Guid iid)
+    {
+        var access = global::WinRT.CastExtensions.As<IDirect3DDxgiInterfaceAccess>(surface);
+        return access.GetInterface(iid);
+    }
+}
