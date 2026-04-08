@@ -1,4 +1,5 @@
-﻿using ScreenFast.Core.Interfaces;
+using ScreenFast.Capture.Interop;
+using ScreenFast.Core.Interfaces;
 using ScreenFast.Core.Results;
 using Windows.Graphics.Capture;
 using WinRT.Interop;
@@ -23,6 +24,10 @@ public sealed class WindowsGraphicsCaptureSourcePickerService : ICaptureSourcePi
 
         try
         {
+            NativeMethods.ShowWindow(ownerWindowHandle, NativeMethods.SwRestore);
+            NativeMethods.SetForegroundWindow(ownerWindowHandle);
+            await Task.Yield();
+
             var picker = new GraphicsCapturePicker();
             InitializeWithWindow.Initialize(picker, ownerWindowHandle);
 

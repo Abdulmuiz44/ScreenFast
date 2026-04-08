@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace ScreenFast.Capture.Interop;
@@ -7,6 +7,7 @@ internal static class NativeMethods
 {
     public const int GwlExStyle = -20;
     public const int WsExToolWindow = 0x00000080;
+    public const int SwRestore = 9;
 
     public delegate bool EnumWindowsProc(nint windowHandle, nint lParam);
 
@@ -35,6 +36,12 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     public static extern nint GetWindowLongPtr(nint windowHandle, int index);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(nint hWnd, int command);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(nint hWnd);
 
     [DllImport("user32.dll")]
     public static extern bool EnumDisplayMonitors(nint hdc, nint clipRect, MonitorEnumProc callback, nint data);
