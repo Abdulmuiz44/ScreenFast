@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Windows.Graphics.Capture;
 
 namespace ScreenFast.Capture.Interop;
@@ -10,7 +10,11 @@ internal static class GraphicsCaptureItemInterop
     public static GraphicsCaptureItem CreateForWindow(nint windowHandle)
     {
         var factory = GetActivationFactory<IGraphicsCaptureItemInterop>(typeof(GraphicsCaptureItem).FullName!);
-        var itemPointer = factory.CreateForWindow(windowHandle, GraphicsCaptureItemGuid);
+        var hr = factory.CreateForWindow(windowHandle, GraphicsCaptureItemGuid, out var itemPointer);
+        if (hr < 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
 
         try
         {
@@ -18,14 +22,21 @@ internal static class GraphicsCaptureItemInterop
         }
         finally
         {
-            Marshal.Release(itemPointer);
+            if (itemPointer != nint.Zero)
+            {
+                Marshal.Release(itemPointer);
+            }
         }
     }
 
     public static GraphicsCaptureItem CreateForMonitor(nint monitorHandle)
     {
         var factory = GetActivationFactory<IGraphicsCaptureItemInterop>(typeof(GraphicsCaptureItem).FullName!);
-        var itemPointer = factory.CreateForMonitor(monitorHandle, GraphicsCaptureItemGuid);
+        var hr = factory.CreateForMonitor(monitorHandle, GraphicsCaptureItemGuid, out var itemPointer);
+        if (hr < 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
 
         try
         {
@@ -33,7 +44,10 @@ internal static class GraphicsCaptureItemInterop
         }
         finally
         {
-            Marshal.Release(itemPointer);
+            if (itemPointer != nint.Zero)
+            {
+                Marshal.Release(itemPointer);
+            }
         }
     }
 
@@ -42,9 +56,11 @@ internal static class GraphicsCaptureItemInterop
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IGraphicsCaptureItemInterop
     {
-        IntPtr CreateForWindow(nint window, in Guid iid);
+        [PreserveSig]
+        int CreateForWindow(nint window, in Guid iid, out nint result);
 
-        IntPtr CreateForMonitor(nint monitor, in Guid iid);
+        [PreserveSig]
+        int CreateForMonitor(nint monitor, in Guid iid, out nint result);
     }
 
     [DllImport("combase.dll", CharSet = CharSet.Unicode)]
