@@ -23,10 +23,10 @@ internal static class MediaFoundationNative
     public static readonly Guid MFMtPixelAspectRatio = new("C6376A1E-8D0A-4027-BE45-6D9A0AD39BB6");
     public static readonly Guid MFMtAudioNumChannels = new("37E48BF5-645E-4C5B-89DE-ADA9E29B696A");
     public static readonly Guid MFMtAudioSamplesPerSecond = new("5FAEEAE7-0290-4C31-9E8A-C534F68D9DBA");
-    public static readonly Guid MFMtAudioAvgBytesPerSecond = new("1AAB75C8-CF4D-19E4-6CA9-4B4C2D66C3CF");
-    public static readonly Guid MFMtAudioBlockAlignment = new("322DE230-9Eeb-43bd-AB7A-FF412251541D");
+    public static readonly Guid MFMtAudioAvgBytesPerSecond = new("1AAB75C8-CFEF-451C-AB95-AC034B8E1731");
+    public static readonly Guid MFMtAudioBlockAlignment = new("322DE230-9EEB-43BD-AB7A-FF412251541D");
     public static readonly Guid MFMtAudioBitsPerSample = new("F2DEB57F-40FA-4764-AA33-ED4F2D1FF669");
-    public static readonly Guid MFMtAudioValidBitsPerSample = new("F2DEB57F-40FA-4764-AA33-ED4F2D1FF669");
+    public static readonly Guid MFMtAudioValidBitsPerSample = new("D9BF8D6A-9530-4B7C-9DDF-FF6FD58BBD06");
     public static readonly Guid MFMtAacPayloadType = new("BFBABE79-7434-4d1c-94F0-72A3B9E17188");
     public static readonly Guid MFMtAacAudioProfileLevelIndication = new("7632F0E6-9538-4d61-ACDA-EA29C8C14456");
     public static readonly Guid MFReadwriteEnableHardwareTransforms = new("A634A91C-822B-41B9-A494-4DE4643612B0");
@@ -53,11 +53,11 @@ internal static class MediaFoundationNative
     [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFCreateMemoryBuffer(uint maxLength, out IMFMediaBuffer buffer);
 
-    [DllImport("mfapi.dll", ExactSpelling = true)]
-    public static extern int MFSetAttributeSize(IMFAttributes attributes, in Guid key, uint width, uint height);
+    public static int MFSetAttributeSize(IMFAttributes attributes, in Guid key, uint width, uint height)
+        => attributes.SetUINT64(key, PackToUInt64(width, height));
 
-    [DllImport("mfapi.dll", ExactSpelling = true)]
-    public static extern int MFSetAttributeRatio(IMFAttributes attributes, in Guid key, uint numerator, uint denominator);
+    public static int MFSetAttributeRatio(IMFAttributes attributes, in Guid key, uint numerator, uint denominator)
+        => attributes.SetUINT64(key, PackToUInt64(numerator, denominator));
 
     [DllImport("mf.dll", ExactSpelling = true)]
     public static extern int MFCreateDXGISurfaceBuffer(in Guid riid, nint surface, uint subresourceIndex, [MarshalAs(UnmanagedType.Bool)] bool bottomUpWhenLinear, out IMFMediaBuffer buffer);
@@ -72,6 +72,17 @@ internal static class MediaFoundationNative
             Marshal.ThrowExceptionForHR(hr);
         }
     }
+
+    public static void ThrowIfFailedWithContext(int hr, string operation)
+    {
+        if (hr < 0)
+        {
+            throw new InvalidOperationException($"{operation} failed with HRESULT 0x{hr:X8}", Marshal.GetExceptionForHR(hr));
+        }
+    }
+
+    private static ulong PackToUInt64(uint high, uint low)
+        => ((ulong)high << 32) | low;
 
     [ComImport]
     [Guid("2CD2D921-C447-44A7-A13C-4ADABFC247E3")]
@@ -118,10 +129,40 @@ internal static class MediaFoundationNative
     }
 
     [ComImport]
-    [Guid("45BC0AAB-ABF9-43EE-BC8D-526CBF620B88")]
+    [Guid("C40A00F2-B93A-4D80-AE8C-5A1C634F58E4")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IMFSample : IMFAttributes
+    public interface IMFSample
     {
+        int GetItem(in Guid guidKey, nint value);
+        int GetItemType(in Guid guidKey, out int itemType);
+        int CompareItem(in Guid guidKey, nint value, [MarshalAs(UnmanagedType.Bool)] out bool result);
+        int Compare(IMFAttributes theirs, int matchType, [MarshalAs(UnmanagedType.Bool)] out bool result);
+        int GetUINT32(in Guid guidKey, out uint value);
+        int GetUINT64(in Guid guidKey, out ulong value);
+        int GetDouble(in Guid guidKey, out double value);
+        int GetGUID(in Guid guidKey, out Guid value);
+        int GetStringLength(in Guid guidKey, out uint length);
+        int GetString(in Guid guidKey, [MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder value, uint size, out uint length);
+        int GetAllocatedString(in Guid guidKey, [MarshalAs(UnmanagedType.LPWStr)] out string value, out uint length);
+        int GetBlobSize(in Guid guidKey, out uint size);
+        int GetBlob(in Guid guidKey, nint buffer, uint size, out uint length);
+        int GetAllocatedBlob(in Guid guidKey, out nint buffer, out uint size);
+        int GetUnknown(in Guid guidKey, in Guid riid, [MarshalAs(UnmanagedType.IUnknown)] out object value);
+        int SetItem(in Guid guidKey, nint value);
+        int DeleteItem(in Guid guidKey);
+        int DeleteAllItems();
+        int SetUINT32(in Guid guidKey, uint value);
+        int SetUINT64(in Guid guidKey, ulong value);
+        int SetDouble(in Guid guidKey, double value);
+        int SetGUID(in Guid guidKey, in Guid value);
+        int SetString(in Guid guidKey, [MarshalAs(UnmanagedType.LPWStr)] string value);
+        int SetBlob(in Guid guidKey, nint buffer, uint size);
+        int SetUnknown(in Guid guidKey, [MarshalAs(UnmanagedType.IUnknown)] object value);
+        int LockStore();
+        int UnlockStore();
+        int GetCount(out uint count);
+        int GetItemByIndex(uint index, out Guid guidKey, nint value);
+        int CopyAllItems(IMFAttributes destination);
         int GetSampleFlags(out uint flags);
         int SetSampleFlags(uint flags);
         int GetSampleTime(out long sampleTime);
