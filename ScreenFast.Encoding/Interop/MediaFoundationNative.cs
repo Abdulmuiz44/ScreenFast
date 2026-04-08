@@ -73,6 +73,14 @@ internal static class MediaFoundationNative
         }
     }
 
+    public static void ThrowIfFailedWithContext(int hr, string operation)
+    {
+        if (hr < 0)
+        {
+            throw new InvalidOperationException($"{operation} failed with HRESULT 0x{hr:X8}", Marshal.GetExceptionForHR(hr));
+        }
+    }
+
     private static ulong PackToUInt64(uint high, uint low)
         => ((ulong)high << 32) | low;
 
@@ -121,10 +129,40 @@ internal static class MediaFoundationNative
     }
 
     [ComImport]
-    [Guid("45BC0AAB-ABF9-43EE-BC8D-526CBF620B88")]
+    [Guid("C40A00F2-B93A-4D80-AE8C-5A1C634F58E4")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IMFSample : IMFAttributes
+    public interface IMFSample
     {
+        int GetItem(in Guid guidKey, nint value);
+        int GetItemType(in Guid guidKey, out int itemType);
+        int CompareItem(in Guid guidKey, nint value, [MarshalAs(UnmanagedType.Bool)] out bool result);
+        int Compare(IMFAttributes theirs, int matchType, [MarshalAs(UnmanagedType.Bool)] out bool result);
+        int GetUINT32(in Guid guidKey, out uint value);
+        int GetUINT64(in Guid guidKey, out ulong value);
+        int GetDouble(in Guid guidKey, out double value);
+        int GetGUID(in Guid guidKey, out Guid value);
+        int GetStringLength(in Guid guidKey, out uint length);
+        int GetString(in Guid guidKey, [MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder value, uint size, out uint length);
+        int GetAllocatedString(in Guid guidKey, [MarshalAs(UnmanagedType.LPWStr)] out string value, out uint length);
+        int GetBlobSize(in Guid guidKey, out uint size);
+        int GetBlob(in Guid guidKey, nint buffer, uint size, out uint length);
+        int GetAllocatedBlob(in Guid guidKey, out nint buffer, out uint size);
+        int GetUnknown(in Guid guidKey, in Guid riid, [MarshalAs(UnmanagedType.IUnknown)] out object value);
+        int SetItem(in Guid guidKey, nint value);
+        int DeleteItem(in Guid guidKey);
+        int DeleteAllItems();
+        int SetUINT32(in Guid guidKey, uint value);
+        int SetUINT64(in Guid guidKey, ulong value);
+        int SetDouble(in Guid guidKey, double value);
+        int SetGUID(in Guid guidKey, in Guid value);
+        int SetString(in Guid guidKey, [MarshalAs(UnmanagedType.LPWStr)] string value);
+        int SetBlob(in Guid guidKey, nint buffer, uint size);
+        int SetUnknown(in Guid guidKey, [MarshalAs(UnmanagedType.IUnknown)] object value);
+        int LockStore();
+        int UnlockStore();
+        int GetCount(out uint count);
+        int GetItemByIndex(uint index, out Guid guidKey, nint value);
+        int CopyAllItems(IMFAttributes destination);
         int GetSampleFlags(out uint flags);
         int SetSampleFlags(uint flags);
         int GetSampleTime(out long sampleTime);

@@ -8,7 +8,7 @@
     mc:Ignorable="d">
 
     <ScrollViewer>
-        <Grid Padding="24" RowSpacing="16">
+        <Grid MaxWidth="1360" Padding="28" RowSpacing="18" HorizontalAlignment="Center">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -23,10 +23,56 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <StackPanel Spacing="4">
-                <TextBlock FontSize="28" FontWeight="SemiBold" Text="ScreenFast" />
-                <TextBlock Opacity="0.72" Text="Native screen recording for everyday Windows use." />
-            </StackPanel>
+            <Border Padding="24"
+                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="20">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Spacing="8">
+                        <Border HorizontalAlignment="Left"
+                                Padding="10,4"
+                                Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                                CornerRadius="999">
+                            <TextBlock Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                       FontWeight="SemiBold"
+                                       Text="Fast desktop capture • MP4 output" />
+                        </Border>
+                        <TextBlock FontSize="32" FontWeight="SemiBold" Text="ScreenFast" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="WrapWholeWords"
+                                   Text="A polished native recorder for capturing screens and windows with system audio, microphone input, hotkeys, recovery, and diagnostics." />
+                    </StackPanel>
+
+                    <Border Grid.Column="1"
+                            MinWidth="220"
+                            Padding="16"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="16">
+                        <StackPanel Spacing="6">
+                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Session" />
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="WrapWholeWords"
+                                       Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
+                            <TextBlock FontFamily="Consolas"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Text="{x:Bind ViewModel.TimerText, Mode=OneWay}" />
+                            <TextBlock Foreground="IndianRed"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       Text="{x:Bind ViewModel.CountdownText, Mode=OneWay}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
 
             <InfoBar Grid.Row="1"
                      IsOpen="{x:Bind ViewModel.IsOnboardingVisible, Mode=OneWay}"
@@ -62,45 +108,71 @@
                 </InfoBar.ActionButton>
             </InfoBar>
 
-            <Grid Grid.Row="3" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+            <Border Grid.Row="3"
+                    Padding="18"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                <Grid ColumnSpacing="18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                <Button MinWidth="180"
-                        Command="{x:Bind ViewModel.SelectSourceCommand}"
-                        Content="Select Source" />
+                    <Button MinWidth="190"
+                            MinHeight="40"
+                            Padding="18,10"
+                            CornerRadius="12"
+                            Command="{x:Bind ViewModel.SelectSourceCommand}"
+                            Content="Select Source" />
 
-                <StackPanel Grid.Column="1" Spacing="2">
-                    <TextBlock FontWeight="SemiBold" Text="{x:Bind ViewModel.SourceSummary, Mode=OneWay}" />
-                    <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SourceDetails, Mode=OneWay}" />
-                    <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SourceIdText, Mode=OneWay}" />
-                </StackPanel>
-            </Grid>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Capture Source" />
+                        <TextBlock FontWeight="SemiBold" Text="{x:Bind ViewModel.SourceSummary, Mode=OneWay}" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.SourceDetails, Mode=OneWay}" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.SourceIdText, Mode=OneWay}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-            <Grid Grid.Row="4" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+            <Border Grid.Row="4"
+                    Padding="18"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                <Grid ColumnSpacing="18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                <Button MinWidth="180"
-                        Command="{x:Bind ViewModel.PickOutputFolderCommand}"
-                        Content="Choose Output Folder" />
+                    <Button MinWidth="190"
+                            MinHeight="40"
+                            Padding="16,10"
+                            CornerRadius="12"
+                            Command="{x:Bind ViewModel.PickOutputFolderCommand}"
+                            Content="Choose Output Folder" />
 
-                <TextBlock Grid.Column="1"
-                           VerticalAlignment="Center"
-                           Opacity="0.72"
-                           Text="{x:Bind ViewModel.OutputFolderText, Mode=OneWay}" />
-            </Grid>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Output" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="WrapWholeWords"
+                                   VerticalAlignment="Center"
+                                   Text="{x:Bind ViewModel.OutputFolderText, Mode=OneWay}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
 
             <Border Grid.Row="5"
-                    Padding="16"
+                    Padding="18"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    CornerRadius="8">
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
                 <StackPanel Spacing="12">
-                    <TextBlock FontWeight="SemiBold" Text="Recording Setup" />
+                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="Recording Setup" />
                     <Grid ColumnSpacing="12" RowSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -146,33 +218,65 @@
                         <Button Grid.Row="2"
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
+                                MinHeight="40"
+                                Padding="16,10"
+                                CornerRadius="12"
                                 Command="{x:Bind ViewModel.ShowOnboardingAgainCommand}"
                                 Content="Show onboarding" />
                     </Grid>
                 </StackPanel>
             </Border>
 
-            <StackPanel Grid.Row="6" Orientation="Horizontal" Spacing="12">
-                <Button MinWidth="120"
-                        Command="{x:Bind ViewModel.RecordCommand}"
-                        Content="Record" />
-                <Button MinWidth="120"
-                        Command="{x:Bind ViewModel.PauseResumeCommand}"
-                        Content="{x:Bind ViewModel.PauseResumeText, Mode=OneWay}" />
-                <Button MinWidth="120"
-                        Command="{x:Bind ViewModel.StopCommand}"
-                        Content="Stop" />
-                <Border Padding="8"
-                        CornerRadius="6"
-                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                    <StackPanel Spacing="2">
-                        <TextBlock FontWeight="SemiBold" Text="Ready check" />
-                        <TextBlock Opacity="0.82" Text="{x:Bind ViewModel.ReadySourceText, Mode=OneWay}" />
-                        <TextBlock Opacity="0.82" Text="{x:Bind ViewModel.ReadyOutputFolderText, Mode=OneWay}" />
-                        <TextBlock Opacity="0.82" Text="{x:Bind ViewModel.AudioChoicesSummary, Mode=OneWay}" />
-                    </StackPanel>
-                </Border>
-            </StackPanel>
+            <Border Grid.Row="6"
+                    Padding="18"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button MinWidth="130"
+                            MinHeight="40"
+                            Padding="18,10"
+                            CornerRadius="12"
+                            Command="{x:Bind ViewModel.RecordCommand}"
+                            Content="Record" />
+                    <Button Grid.Column="1"
+                            MinWidth="130"
+                            MinHeight="40"
+                            Padding="16,10"
+                            CornerRadius="12"
+                            Command="{x:Bind ViewModel.PauseResumeCommand}"
+                            Content="{x:Bind ViewModel.PauseResumeText, Mode=OneWay}" />
+                    <Button Grid.Column="2"
+                            MinWidth="130"
+                            MinHeight="40"
+                            Padding="16,10"
+                            CornerRadius="12"
+                            Command="{x:Bind ViewModel.StopCommand}"
+                            Content="Stop" />
+
+                    <Border Grid.Column="3"
+                            Padding="12"
+                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="14">
+                        <StackPanel Spacing="4">
+                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Ready Check" />
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.ReadySourceText, Mode=OneWay}" />
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.ReadyOutputFolderText, Mode=OneWay}" />
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.AudioChoicesSummary, Mode=OneWay}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
 
             <InfoBar Grid.Row="7"
                      IsOpen="{x:Bind ViewModel.HasDiskSpaceWarning, Mode=OneWay}"
@@ -180,14 +284,21 @@
                      IsClosable="False"
                      Message="{x:Bind ViewModel.DiskSpaceWarningText, Mode=OneWay}" />
 
-            <Grid Grid.Row="8" ColumnSpacing="16">
+            <Border Grid.Row="8"
+                    Padding="18"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Spacing="4">
-                    <TextBlock FontWeight="SemiBold"
+                    <TextBlock FontSize="18"
+                               FontWeight="SemiBold"
                                Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
                                TextWrapping="WrapWholeWords" />
                     <TextBlock FontSize="20"
@@ -197,8 +308,11 @@
                 </StackPanel>
                 <TextBlock Grid.Column="1"
                            FontFamily="Consolas"
+                           FontSize="16"
+                           FontWeight="SemiBold"
                            Text="{x:Bind ViewModel.TimerText, Mode=OneWay}" />
-            </Grid>
+                </Grid>
+            </Border>
 
             <Grid Grid.Row="9" ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
@@ -206,13 +320,15 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <Border Padding="16"
+                <Border Padding="18"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        CornerRadius="8">
+                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="16">
                     <StackPanel Spacing="12">
-                        <TextBlock FontWeight="SemiBold" Text="Startup and Tray" />
-                        <TextBlock Opacity="0.82" Text="{x:Bind ViewModel.SmokeCheckSummaryText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
-                        <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.SmokeCheckDetailsText, Mode=OneWay}" TextWrapping="WrapWholeWords" />
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Startup and Tray" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.SmokeCheckSummaryText, Mode=OneWay}" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.SmokeCheckDetailsText, Mode=OneWay}" />
                         <StackPanel Orientation="Horizontal" Spacing="20">
                             <ToggleSwitch Header="Launch Minimized"
                                           IsOn="{x:Bind ViewModel.LaunchMinimizedToTray, Mode=TwoWay}" />
@@ -221,25 +337,23 @@
                             <ToggleSwitch Header="Minimize To Tray"
                                           IsOn="{x:Bind ViewModel.MinimizeToTray, Mode=TwoWay}" />
                         </StackPanel>
-                        <TextBlock Opacity="0.72" Text="{x:Bind ViewModel.StateText, Mode=OneWay}" />
-                        <TextBlock Opacity="0.72"
-                                   Text="{x:Bind ViewModel.ShellMessageText, Mode=OneWay}"
-                                   TextWrapping="WrapWholeWords" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.StateText, Mode=OneWay}" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.ShellMessageText, Mode=OneWay}" />
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <Button Command="{x:Bind ViewModel.ExportDiagnosticsCommand}" Content="Export Diagnostics" />
-                            <TextBlock VerticalAlignment="Center"
-                                       Opacity="0.72"
-                                       Text="Exports recent logs and safe app metadata into a zip file." />
+                            <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.ExportDiagnosticsCommand}" Content="Export Diagnostics" />
+                            <TextBlock VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="Exports recent logs and safe app metadata into a zip file." />
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
                 <Border Grid.Column="1"
-                        Padding="16"
+                        Padding="18"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        CornerRadius="8">
+                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="16">
                     <StackPanel Spacing="12">
-                        <TextBlock FontWeight="SemiBold" Text="Hotkeys" />
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Hotkeys" />
                         <Grid ColumnSpacing="12" RowSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="160" />
@@ -288,6 +402,9 @@
                         </Grid>
 
                         <Button Width="140"
+                                MinHeight="40"
+                                Padding="16,10"
+                                CornerRadius="12"
                                 Command="{x:Bind ViewModel.ApplyHotkeysCommand}"
                                 Content="Apply Hotkeys" />
                     </StackPanel>
@@ -295,9 +412,11 @@
             </Grid>
 
             <Border Grid.Row="10"
-                    Padding="16"
+                    Padding="18"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    CornerRadius="8">
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -306,41 +425,47 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock FontWeight="SemiBold" Text="Recent Recordings" />
-                    <TextBlock Grid.Row="1"
-                               Opacity="0.72"
-                               Text="{x:Bind ViewModel.RecentRecordingsStatusText, Mode=OneWay}" />
+                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="Recent Recordings" />
+                    <TextBlock Grid.Row="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.RecentRecordingsStatusText, Mode=OneWay}" />
 
                     <ListView Grid.Row="2"
                               MinHeight="240"
+                              Background="Transparent"
                               ItemsSource="{x:Bind ViewModel.RecentRecordings, Mode=OneWay}"
                               SelectedItem="{x:Bind ViewModel.SelectedRecentRecording, Mode=TwoWay}">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="viewModels:RecordingHistoryItemViewModel">
-                                <StackPanel Spacing="2" Margin="0,2,0,6">
-                                    <TextBlock FontWeight="SemiBold" Text="{x:Bind FileName}" />
-                                    <TextBlock Opacity="0.72" Text="{x:Bind SourceSummary}" />
-                                    <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <TextBlock Opacity="0.72" Text="{x:Bind CreatedAtText}" />
-                                        <TextBlock Opacity="0.72" Text="{x:Bind DurationText}" />
-                                        <TextBlock Opacity="0.72" Text="{x:Bind QualityPreset}" />
-                                        <TextBlock Opacity="0.72" Text="{x:Bind MediaFlagsText}" />
-                                        <TextBlock Opacity="0.72" Text="{x:Bind FileSizeText}" />
-                                        <TextBlock Opacity="0.72" Text="{x:Bind AvailabilityText}" />
+                                <Border Margin="0,4,0,6"
+                                        Padding="12"
+                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock FontWeight="SemiBold" Text="{x:Bind FileName}" />
+                                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind SourceSummary}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind CreatedAtText}" />
+                                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind DurationText}" />
+                                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind QualityPreset}" />
+                                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind MediaFlagsText}" />
+                                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind FileSizeText}" />
+                                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind AvailabilityText}" />
+                                        </StackPanel>
+                                        <TextBlock Foreground="IndianRed" Text="{x:Bind FailureText}" />
                                     </StackPanel>
-                                    <TextBlock Foreground="IndianRed" Text="{x:Bind FailureText}" />
-                                </StackPanel>
+                                </Border>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
 
                     <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
-                        <Button Command="{x:Bind ViewModel.OpenRecordingCommand}" Content="Open File" />
-                        <Button Command="{x:Bind ViewModel.OpenContainingFolderCommand}" Content="Open Folder" />
-                        <Button Command="{x:Bind ViewModel.CopyPathCommand}" Content="Copy Path" />
-                        <Button Command="{x:Bind ViewModel.RemoveHistoryItemCommand}" Content="Remove" />
-                        <Button Command="{x:Bind ViewModel.ClearMissingHistoryCommand}" Content="Clear Missing" />
-                        <Button Command="{x:Bind ViewModel.ClearAllHistoryCommand}" Content="Clear All" />
+                        <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.OpenRecordingCommand}" Content="Open File" />
+                        <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.OpenContainingFolderCommand}" Content="Open Folder" />
+                        <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.CopyPathCommand}" Content="Copy Path" />
+                        <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.RemoveHistoryItemCommand}" Content="Remove" />
+                        <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.ClearMissingHistoryCommand}" Content="Clear Missing" />
+                        <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.ClearAllHistoryCommand}" Content="Clear All" />
                     </StackPanel>
                 </Grid>
             </Border>
