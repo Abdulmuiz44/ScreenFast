@@ -19,17 +19,20 @@ public sealed class DiagnosticsExportService : IDiagnosticsExportService
     private readonly IOutputFolderPickerService _outputFolderPickerService;
     private readonly IRecordingHistoryService _recordingHistoryService;
     private readonly IRecoveryService _recoveryService;
+    private readonly IRecordingMetadataReader _metadataReader;
     private readonly IScreenFastLogService _logService;
 
     public DiagnosticsExportService(
         IOutputFolderPickerService outputFolderPickerService,
         IRecordingHistoryService recordingHistoryService,
         IRecoveryService recoveryService,
+        IRecordingMetadataReader metadataReader,
         IScreenFastLogService logService)
     {
         _outputFolderPickerService = outputFolderPickerService;
         _recordingHistoryService = recordingHistoryService;
         _recoveryService = recoveryService;
+        _metadataReader = metadataReader;
         _logService = logService;
     }
 
@@ -78,6 +81,8 @@ public sealed class DiagnosticsExportService : IDiagnosticsExportService
             }
 
             var history = await _recordingHistoryService.GetRecentAsync(cancellationToken);
+            var recentHistory = history.Take(25).ToList();
+            var metadataSidecars = await BuildMetadataSidecarSummariesAsync(recentHistory, cancellationToken);
             var manifest = new DiagnosticsManifest(
                 DateTimeOffset.UtcNow,
                 ResolveAppVersion(),
@@ -86,7 +91,8 @@ public sealed class DiagnosticsExportService : IDiagnosticsExportService
                 settings,
                 snapshot,
                 _recoveryService.CurrentInterruptedSession,
-                history.Take(25).ToList());
+                recentHistory,
+                metadataSidecars);
 
             var manifestPath = Path.Combine(tempFolder, "manifest.json");
             await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, SerializerOptions), cancellationToken);
@@ -130,6 +136,33 @@ public sealed class DiagnosticsExportService : IDiagnosticsExportService
         }
     }
 
+
+    private async Task<IReadOnlyList<DiagnosticsMetadataSidecarSummary>> BuildMetadataSidecarSummariesAsync(
+        IReadOnlyList<RecordingHistoryEntry> history,
+        CancellationToken cancellationToken)
+    {
+        var summaries = new List<DiagnosticsMetadataSidecarSummary>();
+        foreach (var entry in history.Where(x => x.IsSuccess && !string.IsNullOrWhiteSpace(x.FilePath)).Take(10))
+        {
+            try
+            {
+                summaries.Add(await _metadataReader.CreateDiagnosticsSummaryAsync(entry.FilePath, cancellationToken));
+            }
+            catch (Exception ex)
+            {
+                _logService.Warning(
+                    "diagnostics.metadata_summary_failed",
+                    "ScreenFast could not include metadata sidecar awareness for one recording.",
+                    new Dictionary<string, object?>
+                    {
+                        ["fileName"] = entry.FileName,
+                        ["error"] = ex.Message
+                    });
+            }
+        }
+
+        return summaries;
+    }
     private static string ResolveAppVersion()
     {
         return Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
