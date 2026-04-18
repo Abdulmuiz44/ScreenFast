@@ -59,7 +59,7 @@ internal static class MediaFoundationNative
     public static int MFSetAttributeRatio(IMFAttributes attributes, in Guid key, uint numerator, uint denominator)
         => attributes.SetUINT64(key, PackToUInt64(numerator, denominator));
 
-    [DllImport("mf.dll", ExactSpelling = true)]
+    [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFCreateDXGISurfaceBuffer(in Guid riid, nint surface, uint subresourceIndex, [MarshalAs(UnmanagedType.Bool)] bool bottomUpWhenLinear, out IMFMediaBuffer buffer);
 
     [DllImport("mfreadwrite.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]

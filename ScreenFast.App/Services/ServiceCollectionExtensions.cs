@@ -4,6 +4,7 @@ using ScreenFast.App.ViewModels;
 using ScreenFast.Audio.Services;
 using ScreenFast.Capture.Services;
 using ScreenFast.Core.Interfaces;
+using ScreenFast.Core.Services;
 using ScreenFast.Encoding.Services;
 using ScreenFast.Infrastructure.Services;
 
@@ -29,6 +30,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRecordingTelemetryCaptureService, WindowsCursorTelemetryCaptureService>();
         services.AddSingleton<IRecordingMetadataSidecarService, RecordingMetadataSidecarService>();
         services.AddSingleton<IRecordingMetadataReader, RecordingMetadataReader>();
+        services.AddSingleton<IAutoZoomPlanner, DeterministicAutoZoomPlanner>();
+        services.AddSingleton<IAutoZoomPlanService, AutoZoomPlanService>();
+        services.AddSingleton<IStyledExportPlanner, DeterministicStyledExportPlanner>();
+        services.AddSingleton<IStyledExportPlanService, StyledExportPlanService>();
         services.AddSingleton<IRecordingEncoderService, MediaFoundationRecordingEncoderService>();
         services.AddSingleton<ISystemAudioCaptureService, WasapiLoopbackCaptureService>();
         services.AddSingleton<IMicrophoneCaptureService, MicrophoneCaptureService>();
