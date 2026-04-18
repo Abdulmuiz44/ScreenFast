@@ -20,6 +20,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IRecoveryService _recoveryService;
     private readonly IDiagnosticsExportService _diagnosticsExportService;
     private readonly IAppSmokeCheckService _smokeCheckService;
+    private readonly IRecordingMetadataSidecarService _metadataSidecarService;
+    private readonly IAutoZoomPlanService _autoZoomPlanService;
+    private readonly IStyledExportPlanService _styledExportPlanService;
     private readonly DispatcherQueue? _dispatcherQueue;
     private readonly IReadOnlyList<VideoQualityPresetOption> _qualityPresets;
     private readonly IReadOnlyList<PostRecordingOpenBehaviorOption> _postRecordingBehaviors;
@@ -59,7 +62,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IAppPreferencesService preferencesService,
         IRecoveryService recoveryService,
         IDiagnosticsExportService diagnosticsExportService,
-        IAppSmokeCheckService smokeCheckService)
+        IAppSmokeCheckService smokeCheckService,
+        IRecordingMetadataSidecarService metadataSidecarService,
+        IAutoZoomPlanService autoZoomPlanService,
+        IStyledExportPlanService styledExportPlanService)
     {
         _orchestrator = orchestrator;
         _historyService = historyService;
@@ -69,6 +75,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _recoveryService = recoveryService;
         _diagnosticsExportService = diagnosticsExportService;
         _smokeCheckService = smokeCheckService;
+        _metadataSidecarService = metadataSidecarService;
+        _autoZoomPlanService = autoZoomPlanService;
+        _styledExportPlanService = styledExportPlanService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _snapshot = orchestrator.Snapshot;
         _qualityPresets = VideoQualityPresets.All.Select(definition => new VideoQualityPresetOption(definition.Preset, definition.DisplayName)).ToArray();
@@ -106,6 +115,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         OpenRecordingCommand = new AsyncRelayCommand(OpenRecordingAsync, () => SelectedRecentRecording is not null);
         OpenContainingFolderCommand = new AsyncRelayCommand(OpenContainingFolderAsync, () => SelectedRecentRecording is not null);
         CopyPathCommand = new RelayCommand(CopyPath, () => SelectedRecentRecording is not null);
+        GenerateRenderPlansCommand = new AsyncRelayCommand(GenerateRenderPlansAsync, () => CanGenerateRenderPlans);
         RemoveHistoryItemCommand = new AsyncRelayCommand(RemoveHistoryItemAsync, () => SelectedRecentRecording is not null);
         ClearMissingHistoryCommand = new AsyncRelayCommand(ClearMissingHistoryAsync, () => RecentRecordings.Count > 0);
         ClearAllHistoryCommand = new AsyncRelayCommand(ClearAllHistoryAsync, () => RecentRecordings.Count > 0);
@@ -131,6 +141,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand OpenRecordingCommand { get; }
     public AsyncRelayCommand OpenContainingFolderCommand { get; }
     public RelayCommand CopyPathCommand { get; }
+    public AsyncRelayCommand GenerateRenderPlansCommand { get; }
     public AsyncRelayCommand RemoveHistoryItemCommand { get; }
     public AsyncRelayCommand ClearMissingHistoryCommand { get; }
     public AsyncRelayCommand ClearAllHistoryCommand { get; }
@@ -377,6 +388,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public bool CanRecord => !IsCountdownVisible && _snapshot.State == RecorderState.Ready && IsSourceReady && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
     public bool CanPauseResume => _snapshot.State is RecorderState.Recording or RecorderState.Paused;
     public bool CanStop => IsCountdownVisible || _snapshot.State is RecorderState.Recording or RecorderState.Paused;
+    public bool CanGenerateRenderPlans => SelectedRecentRecording is { IsSuccess: true, IsFileAvailable: true };
 
     private bool IsSourceReady => _snapshot.SelectedSource is not null && _snapshot.SelectedSource.Width > 0 && _snapshot.SelectedSource.Height > 0;
 
@@ -764,6 +776,58 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task GenerateRenderPlansAsync()
+    {
+        var selected = SelectedRecentRecording;
+        if (selected is null)
+        {
+            return;
+        }
+
+        if (!selected.IsSuccess || !selected.IsFileAvailable)
+        {
+            PublishFriendlyStatus("Choose an available successful recording before creating render plans.");
+            return;
+        }
+
+        var metadataPath = _metadataSidecarService.GetSidecarPath(selected.FilePath);
+        if (!File.Exists(metadataPath))
+        {
+            PublishFriendlyStatus($"No ScreenFast metadata sidecar found beside {selected.FileName}.");
+            return;
+        }
+
+        var zoomPlanResult = await _autoZoomPlanService.PlanFromSidecarAsync(metadataPath);
+        if (!zoomPlanResult.IsSuccess || zoomPlanResult.Value is null)
+        {
+            PublishFriendlyStatus(zoomPlanResult.Error?.Message ?? "ScreenFast could not create an auto-zoom plan.");
+            return;
+        }
+
+        var zoomPlanPathResult = await _autoZoomPlanService.SavePlanAsync(zoomPlanResult.Value, metadataPath);
+        if (!zoomPlanPathResult.IsSuccess || string.IsNullOrWhiteSpace(zoomPlanPathResult.Value))
+        {
+            PublishFriendlyStatus(zoomPlanPathResult.Error?.Message ?? "ScreenFast could not save the auto-zoom plan.");
+            return;
+        }
+
+        var styledPlanResult = await _styledExportPlanService.PlanFromArtifactsAsync(metadataPath, zoomPlanPathResult.Value);
+        if (!styledPlanResult.IsSuccess || styledPlanResult.Value is null)
+        {
+            PublishFriendlyStatus(styledPlanResult.Error?.Message ?? "ScreenFast could not create a styled export plan.");
+            return;
+        }
+
+        var styledPlanPathResult = await _styledExportPlanService.SavePlanAsync(styledPlanResult.Value, metadataPath);
+        if (!styledPlanPathResult.IsSuccess || string.IsNullOrWhiteSpace(styledPlanPathResult.Value))
+        {
+            PublishFriendlyStatus(styledPlanPathResult.Error?.Message ?? "ScreenFast could not save the styled export plan.");
+            return;
+        }
+
+        PublishFriendlyStatus($"Created render plans: {Path.GetFileName(zoomPlanPathResult.Value)} and {Path.GetFileName(styledPlanPathResult.Value)}.");
+    }
+
     private async Task RemoveHistoryItemAsync()
     {
         if (SelectedRecentRecording is null)
@@ -872,6 +936,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         RaisePropertyChanged(nameof(CanRecord));
         RaisePropertyChanged(nameof(CanPauseResume));
         RaisePropertyChanged(nameof(CanStop));
+        RaisePropertyChanged(nameof(CanGenerateRenderPlans));
         RaiseRecoveryProperties();
         RefreshCommands();
     }
@@ -905,6 +970,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         OpenRecordingCommand.NotifyCanExecuteChanged();
         OpenContainingFolderCommand.NotifyCanExecuteChanged();
         CopyPathCommand.NotifyCanExecuteChanged();
+        GenerateRenderPlansCommand.NotifyCanExecuteChanged();
         RemoveHistoryItemCommand.NotifyCanExecuteChanged();
         ClearMissingHistoryCommand.NotifyCanExecuteChanged();
         ClearAllHistoryCommand.NotifyCanExecuteChanged();

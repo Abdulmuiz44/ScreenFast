@@ -337,7 +337,8 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             try
             {
                 EnsureWriterInitialized(frame.Width, frame.Height);
-                _writer.WriteVideoFrame(frame.TexturePointer, AdjustVideoTimestamp(frame.TimestampHundredsOfNanoseconds));
+                var writer = _writer ?? throw new InvalidOperationException("The video writer could not be initialized for this frame.");
+                writer.WriteVideoFrame(frame.TexturePointer, AdjustVideoTimestamp(frame.TimestampHundredsOfNanoseconds));
                 return OperationResult.Success();
             }
             catch (Exception ex)
@@ -922,7 +923,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
                         try
                         {
-                            MediaFoundationNative.ThrowIfFailedWithContext(_sinkWriter.WriteSample(_videoStreamIndex, sample), "IMFSinkWriter.WriteSample(video)");
+                            MediaFoundationNative.ThrowIfFailedWithContext(_sinkWriter!.WriteSample(_videoStreamIndex, sample), "IMFSinkWriter.WriteSample(video)");
                         }
                         catch (Exception ex)
                         {
@@ -1041,7 +1042,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
                         try
                         {
-                            MediaFoundationNative.ThrowIfFailedWithContext(_sinkWriter.WriteSample(_audioStreamIndex.Value, sample), "IMFSinkWriter.WriteSample(audio)");
+                            MediaFoundationNative.ThrowIfFailedWithContext(_sinkWriter!.WriteSample(_audioStreamIndex.Value, sample), "IMFSinkWriter.WriteSample(audio)");
                         }
                         catch (Exception ex)
                         {

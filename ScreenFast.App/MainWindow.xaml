@@ -271,6 +271,7 @@
                             <AppBarButton Label="Open File" Command="{x:Bind ViewModel.OpenRecordingCommand}" />
                             <AppBarButton Label="Open Folder" Command="{x:Bind ViewModel.OpenContainingFolderCommand}" />
                             <AppBarButton Label="Copy Path" Command="{x:Bind ViewModel.CopyPathCommand}" />
+                            <AppBarButton Label="Create Plans" Command="{x:Bind ViewModel.GenerateRenderPlansCommand}" />
                             <AppBarSeparator />
                             <AppBarButton Label="Remove" Command="{x:Bind ViewModel.RemoveHistoryItemCommand}" />
                             <AppBarButton Label="Clear Missing" Command="{x:Bind ViewModel.ClearMissingHistoryCommand}" />
