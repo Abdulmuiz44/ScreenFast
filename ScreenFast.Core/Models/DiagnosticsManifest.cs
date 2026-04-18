@@ -8,4 +8,5 @@ public sealed record DiagnosticsManifest(
     AppSettings Settings,
     RecorderStatusSnapshot RecorderStatus,
     RecoverySessionMarker? InterruptedSession,
-    IReadOnlyList<RecordingHistoryEntry> RecentHistory);
+    IReadOnlyList<RecordingHistoryEntry> RecentHistory,
+    IReadOnlyList<DiagnosticsMetadataSidecarSummary> RecentMetadataSidecars);

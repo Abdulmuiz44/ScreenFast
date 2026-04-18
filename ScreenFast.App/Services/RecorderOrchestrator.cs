@@ -15,6 +15,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
     private readonly IRecordingPreflightValidator _recordingPreflightValidator;
     private readonly IRecordingFileNameService _recordingFileNameService;
     private readonly IRecoveryService _recoveryService;
+    private readonly IRecordingTelemetryCaptureService _telemetryCaptureService;
+    private readonly IRecordingMetadataSidecarService _metadataSidecarService;
     private readonly IScreenFastLogService _logService;
     private readonly RecorderStateMachine _stateMachine = new();
 
@@ -24,6 +26,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
     private DateTimeOffset _recordingStartedAt;
     private TimeSpan _elapsedBeforePause;
     private RecordingSessionInfo? _activeSession;
+    private IRecordingTelemetrySession? _activeTelemetrySession;
+    private List<string> _activeMetadataWarnings = [];
     private string? _activeSessionId;
 
     public RecorderOrchestrator(
@@ -35,6 +39,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         IRecordingPreflightValidator recordingPreflightValidator,
         IRecordingFileNameService recordingFileNameService,
         IRecoveryService recoveryService,
+        IRecordingTelemetryCaptureService telemetryCaptureService,
+        IRecordingMetadataSidecarService metadataSidecarService,
         IScreenFastLogService logService)
     {
         _captureSourcePickerService = captureSourcePickerService;
@@ -45,6 +51,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         _recordingPreflightValidator = recordingPreflightValidator;
         _recordingFileNameService = recordingFileNameService;
         _recoveryService = recoveryService;
+        _telemetryCaptureService = telemetryCaptureService;
+        _metadataSidecarService = metadataSidecarService;
         _logService = logService;
         _recordingEncoderService.RuntimeErrorOccurred += OnRecordingRuntimeErrorOccurred;
         Snapshot = RecorderStatusSnapshot.CreateDefault();
@@ -116,6 +124,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         _recordingEncoderService.RuntimeErrorOccurred -= OnRecordingRuntimeErrorOccurred;
         CancelCountdown();
         StopTimerLoop(resetDisplay: false);
+        _activeTelemetrySession?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _activeTelemetrySession = null;
     }
 
     public async Task SelectSourceAsync(CancellationToken cancellationToken = default)
@@ -318,6 +328,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             _activeSessionId = Guid.NewGuid().ToString("N");
             _elapsedBeforePause = TimeSpan.Zero;
             _recordingStartedAt = DateTimeOffset.UtcNow;
+            _activeMetadataWarnings = [];
+            TryStartTelemetry(result.Value, _recordingStartedAt);
             await _recoveryService.MarkSessionStartedAsync(
                 new RecoverySessionMarker(
                     _activeSessionId,
@@ -388,6 +400,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         }
 
         _elapsedBeforePause = GetElapsed();
+        _activeTelemetrySession?.Pause(_elapsedBeforePause);
         StopTimerLoop(resetDisplay: false);
         Publish(Snapshot with { State = RecorderState.Paused, StatusMessage = "Recording paused.", TimerText = FormatElapsed(_elapsedBeforePause) });
         _logService.Info("recording.paused", "ScreenFast paused the recording.", BuildRecordingProperties(_activeSession?.FilePath, _elapsedBeforePause));
@@ -424,6 +437,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         }
 
         _recordingStartedAt = DateTimeOffset.UtcNow;
+        _activeTelemetrySession?.Resume(_elapsedBeforePause);
         StartTimerLoop();
         Publish(Snapshot with { State = RecorderState.Recording, StatusMessage = "Recording resumed.", TimerText = FormatElapsed(GetElapsed()) });
         _logService.Info("recording.resumed", "ScreenFast resumed the recording.", BuildRecordingProperties(_activeSession?.FilePath, GetElapsed()));
@@ -463,6 +477,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
 
         var duration = GetElapsed();
         StopTimerLoop(resetDisplay: false);
+        var telemetryTimeline = await TryStopTelemetryAsync(duration, cancellationToken);
         Publish(Snapshot with { State = RecorderState.Stopping, StatusMessage = "Stopping recording..." });
         _logService.Info("recording.stop_requested", "ScreenFast is stopping the recording.", BuildRecordingProperties(_activeSession?.FilePath, duration));
 
@@ -483,6 +498,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
 
         var path = stopResult.Value;
         var fileName = Path.GetFileName(path);
+        var metadataPath = await TrySaveRecordingMetadataAsync(path, duration, telemetryTimeline, cancellationToken);
         await TryAddHistoryEntryAsync(CreateSuccessEntry(path, fileName, duration));
 
         var nextState = Snapshot.SelectedSource is not null && !string.IsNullOrWhiteSpace(Snapshot.OutputFolder)
@@ -490,7 +506,14 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             : RecorderState.Idle;
 
         _stateMachine.TransitionTo(nextState);
-        Publish(Snapshot with { State = nextState, StatusMessage = $"Saved MP4 to {path}", TimerText = "00:00:00" });
+        Publish(Snapshot with
+        {
+            State = nextState,
+            StatusMessage = string.IsNullOrWhiteSpace(metadataPath)
+                ? $"Saved MP4 to {path}. Metadata sidecar was not saved."
+                : $"Saved MP4 to {path}",
+            TimerText = "00:00:00"
+        });
 
         _logService.Info("recording.stopped", "ScreenFast finalized the recording successfully.", BuildRecordingProperties(path, duration));
         _activeSession = null;
@@ -498,6 +521,206 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         await TryRunPostRecordingActionAsync(path);
     }
 
+    private void TryStartTelemetry(RecordingSessionInfo sessionInfo, DateTimeOffset startedAtUtc)
+    {
+        if (_activeSessionId is null || Snapshot.SelectedSource is null)
+        {
+            _activeMetadataWarnings.Add("Cursor telemetry was not started because the recording session context was incomplete.");
+            return;
+        }
+
+        try
+        {
+            var telemetryResult = _telemetryCaptureService.Start(
+                new RecordingTelemetryStartRequest(
+                    _activeSessionId,
+                    Snapshot.SelectedSource,
+                    startedAtUtc,
+                    20));
+
+            if (telemetryResult.IsSuccess && telemetryResult.Value is not null)
+            {
+                _activeTelemetrySession = telemetryResult.Value;
+                return;
+            }
+
+            var warning = telemetryResult.Error?.Message ?? "Cursor telemetry could not start.";
+            _activeMetadataWarnings.Add(warning);
+            _logService.Warning(
+                "telemetry.unavailable",
+                "ScreenFast will continue recording without cursor telemetry.",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _activeSessionId,
+                    ["filePath"] = sessionInfo.FilePath,
+                    ["warning"] = warning
+                });
+        }
+        catch (Exception ex)
+        {
+            _activeMetadataWarnings.Add($"Cursor telemetry could not start: {ex.Message}");
+            _logService.Warning(
+                "telemetry.start_exception",
+                "ScreenFast will continue recording without cursor telemetry.",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _activeSessionId,
+                    ["filePath"] = sessionInfo.FilePath,
+                    ["error"] = ex.Message
+                });
+        }
+    }
+
+    private async Task<RecordingTelemetryTimeline> TryStopTelemetryAsync(TimeSpan duration, CancellationToken cancellationToken = default)
+    {
+        if (_activeTelemetrySession is null)
+        {
+            return CreateFallbackTelemetryTimeline(duration);
+        }
+
+        var session = _activeTelemetrySession;
+        _activeTelemetrySession = null;
+
+        try
+        {
+            return await session.StopAsync(duration, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            var warning = $"Cursor telemetry could not stop cleanly: {ex.Message}";
+            _activeMetadataWarnings.Add(warning);
+            _logService.Warning(
+                "telemetry.stop_failed",
+                "ScreenFast could not stop cursor telemetry cleanly. Recording cleanup will continue.",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _activeSessionId,
+                    ["error"] = ex.Message
+                });
+            return CreateFallbackTelemetryTimeline(duration, warning);
+        }
+        finally
+        {
+            try
+            {
+                await session.DisposeAsync();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private async Task<string?> TrySaveRecordingMetadataAsync(
+        string finalizedVideoPath,
+        TimeSpan duration,
+        RecordingTelemetryTimeline telemetryTimeline,
+        CancellationToken cancellationToken)
+    {
+        if (_activeSession is null || _activeSessionId is null || Snapshot.SelectedSource is null)
+        {
+            _logService.Warning(
+                "metadata.sidecar_skipped",
+                "ScreenFast skipped metadata sidecar creation because recording context was incomplete.",
+                new Dictionary<string, object?> { ["videoPath"] = finalizedVideoPath });
+            return null;
+        }
+
+        try
+        {
+            var metadata = BuildRecordingMetadata(finalizedVideoPath, duration, telemetryTimeline);
+            var saveResult = await _metadataSidecarService.SaveAsync(metadata, cancellationToken);
+            if (saveResult.IsSuccess && !string.IsNullOrWhiteSpace(saveResult.Value))
+            {
+                return saveResult.Value;
+            }
+
+            _logService.Warning(
+                "metadata.sidecar_unavailable",
+                "ScreenFast finalized the MP4, but metadata sidecar persistence failed.",
+                new Dictionary<string, object?>
+                {
+                    ["videoPath"] = finalizedVideoPath,
+                    ["error"] = saveResult.Error?.Message
+                });
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logService.Warning(
+                "metadata.sidecar_exception",
+                "ScreenFast finalized the MP4, but metadata sidecar creation failed.",
+                new Dictionary<string, object?>
+                {
+                    ["videoPath"] = finalizedVideoPath,
+                    ["error"] = ex.Message
+                });
+            return null;
+        }
+    }
+
+    private RecordingSidecarMetadata BuildRecordingMetadata(
+        string finalizedVideoPath,
+        TimeSpan duration,
+        RecordingTelemetryTimeline telemetryTimeline)
+    {
+        var source = Snapshot.SelectedSource!;
+        var sourceMetadata = new RecordingSourceMetadata(
+            source.SourceId,
+            source.Type,
+            source.DisplayName,
+            BuildSourceSummary(),
+            _activeSession?.Width ?? source.Width,
+            _activeSession?.Height ?? source.Height,
+            telemetryTimeline.SourceBounds);
+
+        var warnings = _activeMetadataWarnings
+            .Concat(telemetryTimeline.Warnings)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return new RecordingSidecarMetadata(
+            1,
+            Guid.NewGuid().ToString("N"),
+            _activeSessionId!,
+            DateTimeOffset.UtcNow,
+            _recordingStartedAt,
+            finalizedVideoPath,
+            Path.GetFileName(finalizedVideoPath),
+            sourceMetadata,
+            Math.Max(0, (long)Math.Round(duration.TotalMilliseconds)),
+            Snapshot.QualityPreset,
+            VideoQualityPresets.Get(Snapshot.QualityPreset).DisplayName,
+            Snapshot.IncludeSystemAudio,
+            Snapshot.IncludeMicrophone,
+            Snapshot.CountdownOption,
+            telemetryTimeline,
+            ["Raw recording remains the source of truth. This sidecar is render-planning input for future zoom and styled export work."],
+            warnings);
+    }
+
+    private RecordingTelemetryTimeline CreateFallbackTelemetryTimeline(TimeSpan duration, string? warning = null)
+    {
+        var warnings = _activeMetadataWarnings.ToList();
+        if (!string.IsNullOrWhiteSpace(warning))
+        {
+            warnings.Add(warning);
+        }
+
+        if (warnings.Count == 0)
+        {
+            warnings.Add("Cursor telemetry was unavailable for this recording.");
+        }
+
+        return new RecordingTelemetryTimeline(
+            20,
+            _recordingStartedAt == default ? DateTimeOffset.UtcNow - duration : _recordingStartedAt,
+            DateTimeOffset.UtcNow,
+            null,
+            [],
+            [],
+            warnings.Distinct(StringComparer.Ordinal).ToArray());
+    }
     private async Task<bool> RunCountdownAsync(int countdownSeconds, CancellationToken cancellationToken)
     {
         CancelCountdown();
@@ -690,6 +913,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         }
 
         StopTimerLoop(resetDisplay: false);
+        await TryStopTelemetryAsync(duration);
 
         try
         {
@@ -823,7 +1047,3 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         return properties;
     }
 }
-
-
-
-
