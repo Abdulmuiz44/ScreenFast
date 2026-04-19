@@ -189,35 +189,38 @@ public abstract class WasapiAudioCaptureServiceBase
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(AudioFormatConstants.PumpMilliseconds));
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                var samplesRead = _sampleProvider.Read(floatSamples, 0, floatSamples.Length);
-                if (samplesRead <= 0)
+                while (true)
                 {
-                    continue;
+                    var samplesRead = _sampleProvider.Read(floatSamples, 0, floatSamples.Length);
+                    if (samplesRead <= 0)
+                    {
+                        break;
+                    }
+
+                    if (_isPaused)
+                    {
+                        continue;
+                    }
+
+                    var sampleFrames = samplesRead / AudioFormatConstants.TargetChannels;
+                    var payload = new byte[samplesRead * sizeof(float)];
+                    Buffer.BlockCopy(floatSamples, 0, payload, 0, payload.Length);
+
+                    var timestamp = _sampleFramesEmitted * 10_000_000L / AudioFormatConstants.TargetSampleRate;
+                    _sampleFramesEmitted += sampleFrames;
+
+                    _onAudioChunk(
+                        new AudioChunk(
+                            _kind,
+                            payload,
+                            payload.Length,
+                            AudioFormatConstants.TargetSampleRate,
+                            AudioFormatConstants.TargetChannels,
+                            32,
+                            true,
+                            sampleFrames,
+                            timestamp));
                 }
-
-                if (_isPaused)
-                {
-                    continue;
-                }
-
-                var sampleFrames = samplesRead / AudioFormatConstants.TargetChannels;
-                var payload = new byte[samplesRead * sizeof(float)];
-                Buffer.BlockCopy(floatSamples, 0, payload, 0, payload.Length);
-
-                var timestamp = _sampleFramesEmitted * 10_000_000L / AudioFormatConstants.TargetSampleRate;
-                _sampleFramesEmitted += sampleFrames;
-
-                _onAudioChunk(
-                    new AudioChunk(
-                        _kind,
-                        payload,
-                        payload.Length,
-                        AudioFormatConstants.TargetSampleRate,
-                        AudioFormatConstants.TargetChannels,
-                        32,
-                        true,
-                        sampleFrames,
-                        timestamp));
             }
         }
 

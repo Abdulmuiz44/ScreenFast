@@ -31,6 +31,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     private int _runtimeFaulted;
     private bool _isRecording;
     private bool _isPaused;
+    private bool _isStopping;
     private long? _pauseStartedTimestamp;
     private long _totalPausedDurationHundredsOfNanoseconds;
 
@@ -77,6 +78,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         _backgroundFailure = null;
         _runtimeFaulted = 0;
         _isPaused = false;
+        _isStopping = false;
         _pauseStartedTimestamp = null;
         _totalPausedDurationHundredsOfNanoseconds = 0;
 
@@ -277,6 +279,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         }
 
         var outputPath = _outputPath;
+        _isStopping = true;
 
         try
         {
@@ -312,6 +315,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         {
             _isRecording = false;
             _isPaused = false;
+            _isStopping = false;
             _outputPath = null;
             _pendingWriterInitialization = null;
             _pauseStartedTimestamp = null;
@@ -329,6 +333,11 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     {
         lock (_sync)
         {
+            if (!_isRecording || _isStopping)
+            {
+                return OperationResult.Success();
+            }
+
             if (_isPaused)
             {
                 return OperationResult.Success();
@@ -515,11 +524,10 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
         _isRecording = false;
         _isPaused = false;
+        _isStopping = false;
         _pauseStartedTimestamp = null;
         _totalPausedDurationHundredsOfNanoseconds = 0;
     }
-
-
 
     private static long ConvertStopwatchTicksToHundredsOfNanoseconds(long stopwatchTicks)
     {
@@ -638,7 +646,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         {
             try
             {
-                var framesPerChunk = 48_000 / 50;
+                var framesPerChunk = 48_000 / 20;
                 var samplesPerChunk = framesPerChunk * 2;
                 var mixedSamples = new float[samplesPerChunk];
 
@@ -650,16 +658,28 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                         continue;
                     }
 
-                    var samplesRead = _mixingProvider.Read(mixedSamples, 0, mixedSamples.Length);
-                    if (samplesRead <= 0)
-                    {
-                        continue;
-                    }
+                    var maxBytes = Math.Max(_systemAudioBuffer.BufferedBytes, _microphoneBuffer.BufferedBytes);
+                    var framesAvailable = maxBytes / (2 * sizeof(float));
 
-                    var sampleFrames = samplesRead / 2;
-                    var pcmBytes = new byte[sampleFrames * 2 * sizeof(short)];
-                    ConvertFloatToPcm16(mixedSamples, samplesRead, pcmBytes);
-                    _writer.WriteAudioSamples(pcmBytes, sampleFrames);
+                    while (framesAvailable >= 480)
+                    {
+                        var framesToRead = Math.Min(framesAvailable, framesPerChunk);
+                        var samplesToRead = framesToRead * 2;
+
+                        var readBuffer = framesToRead == framesPerChunk ? mixedSamples : new float[samplesToRead];
+                        var samplesRead = _mixingProvider.Read(readBuffer, 0, samplesToRead);
+                        if (samplesRead <= 0)
+                        {
+                            break;
+                        }
+
+                        var sampleFrames = samplesRead / 2;
+                        var pcmBytes = new byte[sampleFrames * 2 * sizeof(short)];
+                        ConvertFloatToPcm16(readBuffer, samplesRead, pcmBytes);
+                        _writer.WriteAudioSamples(pcmBytes, sampleFrames);
+
+                        framesAvailable -= framesToRead;
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -816,6 +836,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             {
                 MediaFoundationNative.ThrowIfFailed(attributes.SetUINT32(MediaFoundationNative.MFReadwriteEnableHardwareTransforms, 1));
                 MediaFoundationNative.ThrowIfFailed(attributes.SetUnknown(MediaFoundationNative.MFSinkWriterD3DManager, _deviceManager));
+                MediaFoundationNative.ThrowIfFailed(attributes.SetUINT32(MediaFoundationNative.MFSinkWriterDisableThrottling, 1));
                 MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFCreateSinkWriterFromURL(outputPath, nint.Zero, attributes, out var sinkWriter));
                 _sinkWriter = sinkWriter;
 
@@ -861,7 +882,6 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 var relativeTimestamp = _lastVideoTimestamp.HasValue
                     ? Math.Max(_lastVideoTimestamp.Value + _defaultFrameDuration, sourceRelativeTimestamp)
                     : sourceRelativeTimestamp;
-                var duration = _defaultFrameDuration;
 
                 MediaFoundationNative.IMFMediaBuffer mediaBuffer;
                 try
@@ -882,6 +902,8 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
                 try
                 {
+                    SetVideoBufferCurrentLength(mediaBuffer);
+
                     MediaFoundationNative.IMFSample sample;
                     try
                     {
@@ -912,14 +934,8 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                             throw new InvalidOperationException("IMFSample.SetSampleTime(video)", ex);
                         }
 
-                        try
-                        {
-                            MediaFoundationNative.ThrowIfFailedWithContext(sample.SetSampleDuration(duration), "IMFSample.SetSampleDuration(video)");
-                        }
-                        catch (Exception ex)
-                        {
-                            throw new InvalidOperationException("IMFSample.SetSampleDuration(video)", ex);
-                        }
+                        // Let the MP4 Sink Writer calculate frame duration from timestamps,
+                        // which handles variable framerate D3D11 capture more smoothly.
 
                         try
                         {
@@ -943,6 +959,20 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 _lastVideoTimestamp = relativeTimestamp;
                 _videoFramesWritten++;
             });
+        }
+
+        private static void SetVideoBufferCurrentLength(MediaFoundationNative.IMFMediaBuffer mediaBuffer)
+        {
+            try
+            {
+                var twoDimensionalBuffer = (MediaFoundationNative.IMF2DBuffer)mediaBuffer;
+                MediaFoundationNative.ThrowIfFailedWithContext(twoDimensionalBuffer.GetContiguousLength(out var contiguousLength), "IMF2DBuffer.GetContiguousLength(video)");
+                MediaFoundationNative.ThrowIfFailedWithContext(mediaBuffer.SetCurrentLength(contiguousLength), "IMFMediaBuffer.SetCurrentLength(video)");
+            }
+            catch (InvalidCastException ex)
+            {
+                throw new InvalidOperationException("The video frame buffer does not expose IMF2DBuffer.", ex);
+            }
         }
 
         public void WriteAudioSamples(byte[] pcm16Payload, int sampleFrames)
