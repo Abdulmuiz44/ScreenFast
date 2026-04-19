@@ -26,10 +26,12 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     private MediaFoundationMp4Writer? _writer;
     private AudioMixerPump? _audioMixer;
     private string? _outputPath;
+    private PendingWriterInitialization? _pendingWriterInitialization;
     private AppError? _backgroundFailure;
     private int _runtimeFaulted;
     private bool _isRecording;
     private bool _isPaused;
+    private bool _isStopping;
     private long? _pauseStartedTimestamp;
     private long _totalPausedDurationHundredsOfNanoseconds;
 
@@ -76,6 +78,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         _backgroundFailure = null;
         _runtimeFaulted = 0;
         _isPaused = false;
+        _isStopping = false;
         _pauseStartedTimestamp = null;
         _totalPausedDurationHundredsOfNanoseconds = 0;
 
@@ -131,19 +134,12 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
             var qualityDefinition = VideoQualityPresets.Get(request.QualityPreset);
             var includeAudioStream = includeSystemAudio || includeMicrophone;
-            _writer = new MediaFoundationMp4Writer(
-                _outputPath,
-                _captureSession.NativeDevicePointer,
-                _captureSession.Width,
-                _captureSession.Height,
+            _pendingWriterInitialization = new PendingWriterInitialization(
                 qualityDefinition,
-                includeAudioStream);
-
-            _writer.Start();
-            if (includeAudioStream)
-            {
-                _audioMixer?.Start(_writer, HandleRuntimeFailure);
-            }
+                includeAudioStream,
+                includeSystemAudio,
+                includeMicrophone,
+                request.QualityPreset);
 
             var startResult = _captureSession.Start();
             if (!startResult.IsSuccess)
@@ -153,18 +149,6 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             }
 
             _isRecording = true;
-            _logService.Info(
-                "encoder.started",
-                "ScreenFast encoder started successfully.",
-                new Dictionary<string, object?>
-                {
-                    ["outputPath"] = _outputPath,
-                    ["width"] = _captureSession.Width,
-                    ["height"] = _captureSession.Height,
-                    ["includeSystemAudio"] = includeSystemAudio,
-                    ["includeMicrophone"] = includeMicrophone,
-                    ["qualityPreset"] = request.QualityPreset
-                });
 
             return OperationResult<RecordingSessionInfo>.Success(
                 new RecordingSessionInfo(
@@ -289,12 +273,13 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     {
         _logService.Info("encoder.stop_requested", "ScreenFast encoder stop was requested.");
 
-        if ((!_isRecording && _backgroundFailure is null) || _writer is null || string.IsNullOrWhiteSpace(_outputPath))
+        if ((!_isRecording && _backgroundFailure is null) || string.IsNullOrWhiteSpace(_outputPath))
         {
             return OperationResult<string>.Failure(AppError.InvalidState("There is no active recording to stop."));
         }
 
         var outputPath = _outputPath;
+        _isStopping = true;
 
         try
         {
@@ -330,7 +315,9 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         {
             _isRecording = false;
             _isPaused = false;
+            _isStopping = false;
             _outputPath = null;
+            _pendingWriterInitialization = null;
             _pauseStartedTimestamp = null;
             _totalPausedDurationHundredsOfNanoseconds = 0;
         }
@@ -346,9 +333,9 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
     {
         lock (_sync)
         {
-            if (_writer is null)
+            if (!_isRecording || _isStopping)
             {
-                return OperationResult.Failure(AppError.RecordingFailed("The video writer is not available."));
+                return OperationResult.Success();
             }
 
             if (_isPaused)
@@ -358,16 +345,74 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
             try
             {
-                _writer.WriteVideoFrame(frame.TexturePointer, AdjustVideoTimestamp(frame.TimestampHundredsOfNanoseconds));
+                EnsureWriterInitialized(frame.Width, frame.Height);
+                var writer = _writer ?? throw new InvalidOperationException("The video writer could not be initialized for this frame.");
+                writer.WriteVideoFrame(frame.TexturePointer, AdjustVideoTimestamp(frame.TimestampHundredsOfNanoseconds));
                 return OperationResult.Success();
             }
             catch (Exception ex)
             {
-                var error = AppError.RecordingFailed($"A video frame could not be written: {ex.Message}");
+                var error = AppError.RecordingFailed($"A video frame could not be written: {BuildVideoFrameErrorMessage(ex)}");
                 HandleRuntimeFailure(error);
                 return OperationResult.Failure(error);
             }
         }
+    }
+
+    private void EnsureWriterInitialized(int frameWidth, int frameHeight)
+    {
+        if (_writer is not null)
+        {
+            return;
+        }
+
+        if (_captureSession is null || string.IsNullOrWhiteSpace(_outputPath) || _pendingWriterInitialization is null)
+        {
+            throw new InvalidOperationException("The video writer could not be initialized for the first frame.");
+        }
+
+        _writer = new MediaFoundationMp4Writer(
+            _outputPath,
+            _captureSession.NativeDevicePointer,
+            frameWidth,
+            frameHeight,
+            _pendingWriterInitialization.QualityDefinition,
+            _pendingWriterInitialization.IncludeAudioStream);
+
+        _writer.Start();
+        if (_pendingWriterInitialization.IncludeAudioStream)
+        {
+            _audioMixer?.Start(_writer, HandleRuntimeFailure);
+        }
+
+        _logService.Info(
+            "encoder.started",
+            "ScreenFast encoder started successfully.",
+            new Dictionary<string, object?>
+            {
+                ["outputPath"] = _outputPath,
+                ["width"] = frameWidth,
+                ["height"] = frameHeight,
+                ["includeSystemAudio"] = _pendingWriterInitialization.IncludeSystemAudio,
+                ["includeMicrophone"] = _pendingWriterInitialization.IncludeMicrophone,
+                ["qualityPreset"] = _pendingWriterInitialization.QualityPreset
+            });
+
+        _pendingWriterInitialization = null;
+    }
+
+    private static string BuildVideoFrameErrorMessage(Exception exception)
+    {
+        var messages = new List<string>();
+        var current = exception;
+
+        while (current is not null)
+        {
+            messages.Add(current.Message);
+            current = current.InnerException;
+        }
+
+        return string.Join(" => ", messages.Distinct());
     }
 
     private void OnAudioChunk(AudioChunk chunk)
@@ -456,7 +501,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
         if (writer is not null)
         {
-            if (finalizeWriter)
+            if (finalizeWriter && _backgroundFailure is null && writer.HasWrittenVideoFrames)
             {
                 try
                 {
@@ -468,17 +513,21 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                     _logService.Warning("encoder.finalize_failed", ex.Message);
                 }
             }
+            else if (finalizeWriter && _backgroundFailure is null)
+            {
+                _backgroundFailure = AppError.RecordingFailed("ScreenFast stopped before any video frames were captured, so there was no MP4 file to finalize.");
+                _logService.Warning("encoder.finalize_skipped", _backgroundFailure.Message, new Dictionary<string, object?> { ["outputPath"] = _outputPath });
+            }
 
             writer.Dispose();
         }
 
         _isRecording = false;
         _isPaused = false;
+        _isStopping = false;
         _pauseStartedTimestamp = null;
         _totalPausedDurationHundredsOfNanoseconds = 0;
     }
-
-
 
     private static long ConvertStopwatchTicksToHundredsOfNanoseconds(long stopwatchTicks)
     {
@@ -597,7 +646,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         {
             try
             {
-                var framesPerChunk = 48_000 / 50;
+                var framesPerChunk = 48_000 / 20;
                 var samplesPerChunk = framesPerChunk * 2;
                 var mixedSamples = new float[samplesPerChunk];
 
@@ -609,16 +658,28 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                         continue;
                     }
 
-                    var samplesRead = _mixingProvider.Read(mixedSamples, 0, mixedSamples.Length);
-                    if (samplesRead <= 0)
-                    {
-                        continue;
-                    }
+                    var maxBytes = Math.Max(_systemAudioBuffer.BufferedBytes, _microphoneBuffer.BufferedBytes);
+                    var framesAvailable = maxBytes / (2 * sizeof(float));
 
-                    var sampleFrames = samplesRead / 2;
-                    var pcmBytes = new byte[sampleFrames * 2 * sizeof(short)];
-                    ConvertFloatToPcm16(mixedSamples, samplesRead, pcmBytes);
-                    _writer.WriteAudioSamples(pcmBytes, sampleFrames);
+                    while (framesAvailable >= 480)
+                    {
+                        var framesToRead = Math.Min(framesAvailable, framesPerChunk);
+                        var samplesToRead = framesToRead * 2;
+
+                        var readBuffer = framesToRead == framesPerChunk ? mixedSamples : new float[samplesToRead];
+                        var samplesRead = _mixingProvider.Read(readBuffer, 0, samplesToRead);
+                        if (samplesRead <= 0)
+                        {
+                            break;
+                        }
+
+                        var sampleFrames = samplesRead / 2;
+                        var pcmBytes = new byte[sampleFrames * 2 * sizeof(short)];
+                        ConvertFloatToPcm16(readBuffer, samplesRead, pcmBytes);
+                        _writer.WriteAudioSamples(pcmBytes, sampleFrames);
+
+                        framesAvailable -= framesToRead;
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -669,6 +730,13 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         }
     }
 
+    private sealed record PendingWriterInitialization(
+        VideoQualityPresetDefinition QualityDefinition,
+        bool IncludeAudioStream,
+        bool IncludeSystemAudio,
+        bool IncludeMicrophone,
+        VideoQualityPreset QualityPreset);
+
     private sealed class MediaFoundationMp4Writer : IDisposable
     {
         private readonly BlockingCollection<WriterWorkItem> _writerQueue = new();
@@ -682,8 +750,11 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
         private long? _firstVideoTimestamp;
         private long? _lastVideoTimestamp;
         private long _audioFramesWritten;
+        private long _videoFramesWritten;
         private bool _isFinalized;
         private bool _isDisposed;
+
+        public bool HasWrittenVideoFrames => _videoFramesWritten > 0;
 
         public MediaFoundationMp4Writer(string outputPath, nint devicePointer, int width, int height, VideoQualityPresetDefinition qualityDefinition, bool includeAudio)
         {
@@ -765,6 +836,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
             {
                 MediaFoundationNative.ThrowIfFailed(attributes.SetUINT32(MediaFoundationNative.MFReadwriteEnableHardwareTransforms, 1));
                 MediaFoundationNative.ThrowIfFailed(attributes.SetUnknown(MediaFoundationNative.MFSinkWriterD3DManager, _deviceManager));
+                MediaFoundationNative.ThrowIfFailed(attributes.SetUINT32(MediaFoundationNative.MFSinkWriterDisableThrottling, 1));
                 MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFCreateSinkWriterFromURL(outputPath, nint.Zero, attributes, out var sinkWriter));
                 _sinkWriter = sinkWriter;
 
@@ -806,27 +878,73 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 ThrowIfFinalized();
 
                 _firstVideoTimestamp ??= timestampHundredsOfNanoseconds;
-                var relativeTimestamp = Math.Max(0, timestampHundredsOfNanoseconds - _firstVideoTimestamp.Value);
-                var duration = _lastVideoTimestamp.HasValue
-                    ? Math.Max(_defaultFrameDuration, relativeTimestamp - _lastVideoTimestamp.Value)
-                    : _defaultFrameDuration;
+                var sourceRelativeTimestamp = Math.Max(0, timestampHundredsOfNanoseconds - _firstVideoTimestamp.Value);
+                var relativeTimestamp = _lastVideoTimestamp.HasValue
+                    ? Math.Max(_lastVideoTimestamp.Value + _defaultFrameDuration, sourceRelativeTimestamp)
+                    : sourceRelativeTimestamp;
 
-                MediaFoundationNative.ThrowIfFailed(
-                    MediaFoundationNative.MFCreateDXGISurfaceBuffer(
-                        Direct3D11Texture2DGuid,
-                        texturePointer,
-                        0,
-                        false,
-                        out var mediaBuffer));
+                MediaFoundationNative.IMFMediaBuffer mediaBuffer;
                 try
                 {
-                    MediaFoundationNative.ThrowIfFailed(MediaFoundationNative.MFCreateSample(out var sample));
+                    MediaFoundationNative.ThrowIfFailedWithContext(
+                        MediaFoundationNative.MFCreateDXGISurfaceBuffer(
+                            Direct3D11Texture2DGuid,
+                            texturePointer,
+                            0,
+                            false,
+                            out mediaBuffer),
+                        "MFCreateDXGISurfaceBuffer(video)");
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("MFCreateDXGISurfaceBuffer(video)", ex);
+                }
+
+                try
+                {
+                    SetVideoBufferCurrentLength(mediaBuffer);
+
+                    MediaFoundationNative.IMFSample sample;
                     try
                     {
-                        MediaFoundationNative.ThrowIfFailed(sample.AddBuffer(mediaBuffer));
-                        MediaFoundationNative.ThrowIfFailed(sample.SetSampleTime(relativeTimestamp));
-                        MediaFoundationNative.ThrowIfFailed(sample.SetSampleDuration(duration));
-                        MediaFoundationNative.ThrowIfFailed(_sinkWriter.WriteSample(_videoStreamIndex, sample));
+                        MediaFoundationNative.ThrowIfFailedWithContext(MediaFoundationNative.MFCreateSample(out sample), "MFCreateSample(video)");
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException("MFCreateSample(video)", ex);
+                    }
+
+                    try
+                    {
+                        try
+                        {
+                            MediaFoundationNative.ThrowIfFailedWithContext(sample.AddBuffer(mediaBuffer), "IMFSample.AddBuffer(video)");
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new InvalidOperationException("IMFSample.AddBuffer(video)", ex);
+                        }
+
+                        try
+                        {
+                            MediaFoundationNative.ThrowIfFailedWithContext(sample.SetSampleTime(relativeTimestamp), "IMFSample.SetSampleTime(video)");
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new InvalidOperationException("IMFSample.SetSampleTime(video)", ex);
+                        }
+
+                        // Let the MP4 Sink Writer calculate frame duration from timestamps,
+                        // which handles variable framerate D3D11 capture more smoothly.
+
+                        try
+                        {
+                            MediaFoundationNative.ThrowIfFailedWithContext(_sinkWriter!.WriteSample(_videoStreamIndex, sample), "IMFSinkWriter.WriteSample(video)");
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new InvalidOperationException("IMFSinkWriter.WriteSample(video)", ex);
+                        }
                     }
                     finally
                     {
@@ -839,7 +957,22 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
                 }
 
                 _lastVideoTimestamp = relativeTimestamp;
+                _videoFramesWritten++;
             });
+        }
+
+        private static void SetVideoBufferCurrentLength(MediaFoundationNative.IMFMediaBuffer mediaBuffer)
+        {
+            try
+            {
+                var twoDimensionalBuffer = (MediaFoundationNative.IMF2DBuffer)mediaBuffer;
+                MediaFoundationNative.ThrowIfFailedWithContext(twoDimensionalBuffer.GetContiguousLength(out var contiguousLength), "IMF2DBuffer.GetContiguousLength(video)");
+                MediaFoundationNative.ThrowIfFailedWithContext(mediaBuffer.SetCurrentLength(contiguousLength), "IMFMediaBuffer.SetCurrentLength(video)");
+            }
+            catch (InvalidCastException ex)
+            {
+                throw new InvalidOperationException("The video frame buffer does not expose IMF2DBuffer.", ex);
+            }
         }
 
         public void WriteAudioSamples(byte[] pcm16Payload, int sampleFrames)
@@ -939,7 +1072,7 @@ public sealed class MediaFoundationRecordingEncoderService : IRecordingEncoderSe
 
                         try
                         {
-                            MediaFoundationNative.ThrowIfFailedWithContext(_sinkWriter.WriteSample(_audioStreamIndex.Value, sample), "IMFSinkWriter.WriteSample(audio)");
+                            MediaFoundationNative.ThrowIfFailedWithContext(_sinkWriter!.WriteSample(_audioStreamIndex.Value, sample), "IMFSinkWriter.WriteSample(audio)");
                         }
                         catch (Exception ex)
                         {
