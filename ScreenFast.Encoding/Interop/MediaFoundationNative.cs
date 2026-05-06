@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace ScreenFast.Encoding.Interop;
 
@@ -31,6 +31,7 @@ internal static class MediaFoundationNative
     public static readonly Guid MFMtAacAudioProfileLevelIndication = new("7632F0E6-9538-4d61-ACDA-EA29C8C14456");
     public static readonly Guid MFReadwriteEnableHardwareTransforms = new("A634A91C-822B-41B9-A494-4DE4643612B0");
     public static readonly Guid MFSinkWriterD3DManager = new("EC822DA2-E1E9-4B29-A0D8-563C719F5269");
+    public static readonly Guid MFSinkWriterDisableThrottling = new("08B845D8-2B74-4AFE-9D53-BE16D2D5AE4F");
 
     [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFStartup(int version, int flags);
@@ -59,7 +60,7 @@ internal static class MediaFoundationNative
     public static int MFSetAttributeRatio(IMFAttributes attributes, in Guid key, uint numerator, uint denominator)
         => attributes.SetUINT64(key, PackToUInt64(numerator, denominator));
 
-    [DllImport("mf.dll", ExactSpelling = true)]
+    [DllImport("mfplat.dll", ExactSpelling = true)]
     public static extern int MFCreateDXGISurfaceBuffer(in Guid riid, nint surface, uint subresourceIndex, [MarshalAs(UnmanagedType.Bool)] bool bottomUpWhenLinear, out IMFMediaBuffer buffer);
 
     [DllImport("mfreadwrite.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
@@ -189,6 +190,20 @@ internal static class MediaFoundationNative
         int GetCurrentLength(out uint currentLength);
         int SetCurrentLength(uint currentLength);
         int GetMaxLength(out uint maxLength);
+    }
+
+    [ComImport]
+    [Guid("7DC9D5F9-9ED9-44EC-9BBF-0600BB589FBB")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IMF2DBuffer
+    {
+        int Lock2D(out nint scanline0, out int pitch);
+        int Unlock2D();
+        int GetScanline0AndPitch(out nint scanline0, out int pitch);
+        int IsContiguousFormat([MarshalAs(UnmanagedType.Bool)] out bool isContiguous);
+        int GetContiguousLength(out uint length);
+        int ContiguousCopyTo(nint destinationBuffer, uint destinationBufferSize);
+        int ContiguousCopyFrom(nint sourceBuffer, uint sourceBufferSize);
     }
 
     [ComImport]

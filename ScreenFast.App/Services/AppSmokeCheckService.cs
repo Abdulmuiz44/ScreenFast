@@ -41,6 +41,7 @@ public sealed class AppSmokeCheckService : IAppSmokeCheckService
             CheckOverlaySupport(ownerWindowHandle),
             CheckCaptureSupport(),
             CheckEncodingSupport(),
+            CheckStyledExportSupport(),
             CheckRecoveryStorage()
         };
 
@@ -187,6 +188,31 @@ public sealed class AppSmokeCheckService : IAppSmokeCheckService
         return missing.Count == 0
             ? new SmokeCheckItem("MP4 encoding", SmokeCheckSeverity.Ok, "Media Foundation libraries are available for MP4 encoding.")
             : new SmokeCheckItem("MP4 encoding", SmokeCheckSeverity.Error, $"Media Foundation libraries are missing: {string.Join(", ", missing)}");
+    }
+
+    private static SmokeCheckItem CheckStyledExportSupport()
+    {
+        var configured = Environment.GetEnvironmentVariable("SCREENFAST_FFMPEG_PATH");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return File.Exists(configured)
+                ? new SmokeCheckItem("Styled export", SmokeCheckSeverity.Ok, "ffmpeg is configured for styled auto-zoom exports.")
+                : new SmokeCheckItem("Styled export", SmokeCheckSeverity.Warning, $"SCREENFAST_FFMPEG_PATH points to a missing file: {configured}");
+        }
+
+        var pathValue = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(pathValue))
+        {
+            foreach (var folder in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (File.Exists(Path.Combine(folder, "ffmpeg.exe")))
+                {
+                    return new SmokeCheckItem("Styled export", SmokeCheckSeverity.Ok, "ffmpeg is available for styled auto-zoom exports.");
+                }
+            }
+        }
+
+        return new SmokeCheckItem("Styled export", SmokeCheckSeverity.Warning, "ffmpeg was not found. Auto Zoom plans will be created, but styled MP4 export needs ffmpeg on PATH or SCREENFAST_FFMPEG_PATH.");
     }
 
     private static SmokeCheckItem CheckRecoveryStorage()

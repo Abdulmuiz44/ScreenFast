@@ -1,0 +1,11 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">ScreenFast mark</title>
+  <desc id="desc">A minimal screen recorder app mark with a window frame, speed chevrons, and recording dot.</desc>
+  <rect width="512" height="512" rx="112" fill="#111827"/>
+  <rect x="112" y="146" width="288" height="220" rx="34" fill="#F8FAFC"/>
+  <rect x="138" y="178" width="236" height="154" rx="20" fill="#111827"/>
+  <path d="M205 218L257 256L205 294V218Z" fill="#38BDF8"/>
+  <path d="M268 218L320 256L268 294V218Z" fill="#38BDF8"/>
+  <circle cx="362" cy="150" r="34" fill="#EF4444"/>
+  <path d="M210 392H302" stroke="#F8FAFC" stroke-width="28" stroke-linecap="round"/>
+</svg>

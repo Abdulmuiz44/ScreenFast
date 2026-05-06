@@ -1,0 +1,17 @@
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">ScreenFast logo</title>
+  <desc id="desc">Horizontal ScreenFast logo with a minimal screen recorder mark and wordmark.</desc>
+  <rect width="1200" height="320" fill="#FFFFFF"/>
+  <g transform="translate(80 64)">
+    <rect width="192" height="192" rx="42" fill="#111827"/>
+    <rect x="42" y="54" width="108" height="84" rx="15" fill="#F8FAFC"/>
+    <rect x="52" y="64" width="88" height="64" rx="9" fill="#111827"/>
+    <path d="M77 80L98 96L77 112V80Z" fill="#38BDF8"/>
+    <path d="M104 80L125 96L104 112V80Z" fill="#38BDF8"/>
+    <circle cx="150" cy="55" r="13" fill="#EF4444"/>
+    <path d="M76 153H116" stroke="#F8FAFC" stroke-width="12" stroke-linecap="round"/>
+  </g>
+  <text x="320" y="188" fill="#111827" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="88" font-weight="700" letter-spacing="0">Screen</text>
+  <text x="638" y="188" fill="#0284C7" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="88" font-weight="800" letter-spacing="0">Fast</text>
+  <circle cx="878" cy="109" r="10" fill="#EF4444"/>
+</svg>

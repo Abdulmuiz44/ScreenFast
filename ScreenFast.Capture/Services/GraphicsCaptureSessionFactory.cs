@@ -91,7 +91,7 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             _frameProcessor = frameProcessor;
             _runtimeErrorHandler = runtimeErrorHandler;
             _logService = logService;
-            _initialSize = captureItem.Size;
+            _initialSize = NormalizeRecordingSize(captureItem.Size);
         }
 
         public nint NativeDevicePointer => _deviceResources.DevicePointer;
@@ -215,8 +215,8 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
                         new CapturedFrame(
                             texturePointer,
                             frame.SystemRelativeTime.Ticks,
-                            frame.ContentSize.Width,
-                            frame.ContentSize.Height));
+                            _initialSize.Width,
+                            _initialSize.Height));
 
                     if (!frameResult.IsSuccess && frameResult.Error is not null)
                     {
@@ -262,6 +262,23 @@ public sealed class GraphicsCaptureSessionFactory : ICaptureSessionFactory
             _captureSession = null;
             _isStarted = false;
             _isPaused = false;
+        }
+
+        private static SizeInt32 NormalizeRecordingSize(SizeInt32 size)
+        {
+            return new SizeInt32(
+                Math.Max(2, RoundUpToEven(size.Width)),
+                Math.Max(2, RoundUpToEven(size.Height)));
+        }
+
+        private static int RoundUpToEven(int value)
+        {
+            if (value <= 0)
+            {
+                return 2;
+            }
+
+            return value % 2 == 0 ? value : value + 1;
         }
     }
 }

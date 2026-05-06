@@ -140,6 +140,7 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
         PostRecordingOpenBehavior postRecordingOpenBehavior,
         RecordingCountdownOption countdownOption,
         bool overlayEnabled,
+        bool autoZoomEnabled,
         bool isOnboardingDismissed,
         CancellationToken cancellationToken = default)
     {
@@ -151,6 +152,7 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
             PostRecordingOpenBehavior = postRecordingOpenBehavior,
             CountdownOption = countdownOption,
             OverlayEnabled = overlayEnabled,
+            AutoZoomEnabled = autoZoomEnabled,
             IsOnboardingDismissed = isOnboardingDismissed
         };
 
@@ -166,6 +168,7 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
                 ["postRecordingOpenBehavior"] = postRecordingOpenBehavior,
                 ["countdownOption"] = countdownOption,
                 ["overlayEnabled"] = overlayEnabled,
+                ["autoZoomEnabled"] = autoZoomEnabled,
                 ["isOnboardingDismissed"] = isOnboardingDismissed
             });
         return await PersistAsync(CurrentSettings, cancellationToken);
@@ -214,6 +217,7 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
             PostRecordingOpenBehavior = snapshot.PostRecordingOpenBehavior,
             CountdownOption = snapshot.CountdownOption,
             OverlayEnabled = snapshot.OverlayEnabled,
+            AutoZoomEnabled = snapshot.AutoZoomEnabled,
             LastSelectedSource = snapshot.SelectedSource
         };
 

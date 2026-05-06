@@ -18,6 +18,8 @@ public interface IRecorderOrchestrator
 
     void UpdatePolishPreferences(RecordingCountdownOption countdownOption, bool overlayEnabled);
 
+    void UpdateAutoZoomPreference(bool autoZoomEnabled);
+
     void PublishUserMessage(string message);
 
     Task SelectSourceAsync(CancellationToken cancellationToken = default);
