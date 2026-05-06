@@ -7,6 +7,8 @@ public static class ScreenFastPaths
         "ScreenFast");
 
     public static string LogsFolderPath => Path.Combine(RootFolderPath, "Logs");
+    public static string ToolsFolderPath => Path.Combine(RootFolderPath, "Tools");
+    public static string FfmpegFolderPath => Path.Combine(ToolsFolderPath, "ffmpeg");
     public static string SettingsFilePath => Path.Combine(RootFolderPath, "settings.json");
     public static string HistoryFilePath => Path.Combine(RootFolderPath, "recording-history.json");
     public static string RecoveryStateFilePath => Path.Combine(RootFolderPath, "active-session.json");

@@ -60,22 +60,25 @@ Implemented or largely present:
 - Safer filename generation.
 - Local release notes and startup smoke checks.
 - Build and source-picker stabilization work.
+- Cursor telemetry and click-event sidecars beside recordings.
+- Deterministic auto-zoom plan generation from recording metadata.
+- Automatic Auto Zoom planning after recording stop when the Auto Zoom setting is enabled.
+- Deterministic styled-export plan generation for future render output.
+- First-pass styled auto-zoom MP4 rendering through an ffmpeg-backed export service when ffmpeg is available.
 
 Not yet implemented in the real product direction:
 
-- Cursor telemetry as a first-class timeline artifact.
-- Click and interaction event capture.
-- Auto-zoom planning.
-- Cursor-follow framing.
-- Click emphasis or spotlight logic.
-- Presentation-aware camera path generation.
-- Background replacement, color, gradient, or image styling.
-- Rounded recorded-content frame, shadows, padding, spacing, and safe-margin layout.
-- Export renderer for polished outputs.
+- Fully native Media Foundation/Direct3D styled export rendering without ffmpeg.
+- Smooth sub-segment camera interpolation in rendered exports.
+- Live visual auto-zoom in the raw capture stream.
+- Cursor-follow framing in exported video.
+- Click emphasis or spotlight rendering beyond camera zoom.
+- Gradient/image background rendering.
+- Rounded recorded-content frame and shadow rendering.
 - Creator-style scene composition presets.
-- Robust styled export workflow on top of raw capture.
+- Installer/runtime UI that clearly discloses and manages the ffmpeg export dependency.
 
-The honest state: ScreenFast is currently a recorder with meaningful reliability work. The true north star is a recorder plus render/presentation engine.
+The honest state: ScreenFast is currently a recorder with meaningful reliability work and metadata-driven auto-zoom planning. The true north star is still a recorder plus render/presentation engine that produces polished zoomed video output.
 
 ## Product Principles
 
@@ -125,6 +128,23 @@ The recommended evolution is staged:
 
 The key architectural rule: smart zoom and styling should first be modeled as metadata-driven render/export work, not as live-capture hacks.
 
+## Cross-Platform Direction
+
+ScreenFast should not claim macOS or Linux support from the current Windows release. The existing app is Windows-native by design: WinUI, Windows Graphics Capture, Direct3D/DXGI, WASAPI, Media Foundation, Windows pickers, tray/hotkey behavior, and `user32.dll` interop are all part of the current implementation.
+
+macOS and Linux support would require real platform ports, not just new release packages. The shared opportunity is to keep core product models, recorder state, metadata contracts, planner logic, history, diagnostics, and future render-planning concepts portable while each operating system owns its native capture and shell implementation.
+
+Recommended shape:
+
+- Keep `ScreenFast.Core` as the platform-neutral product contract wherever possible.
+- Split platform services behind existing interfaces rather than weakening the Windows implementation.
+- Build a native Windows app first, then add separate native app shells for macOS and Linux.
+- Use native capture stacks per platform: ScreenCaptureKit / AVFoundation on macOS, and PipeWire / xdg-desktop-portal plus appropriate audio capture on Linux.
+- Treat packaging, signing, permissions, and smoke tests as platform-specific release work.
+- Do not publish macOS or Linux release assets until those platform builds have real capture, audio, encoding, diagnostics, and manual smoke validation.
+
+The cross-platform goal should be staged after the Windows recorder foundation is stable enough to serve as the reference behavior. The first cross-platform milestone should be a technical spike proving source selection, video-only recording, microphone/system audio strategy, MP4 output, permissions, and app lifecycle on each target OS.
+
 ## Roadmap
 
 ### Phase A: Stabilize Existing Native Recorder and Local Build Reliability
@@ -159,6 +179,8 @@ Do not do yet:
 
 Goal: capture user intent as metadata while preserving raw recording reliability.
 
+Status: implemented as a first slice. Cursor samples and click events are captured as recording metadata sidecars. Continued work should focus on validation quality, diagnostics, and edge cases rather than treating telemetry as absent.
+
 Key workstreams:
 
 - Record cursor position over time relative to the captured source.
@@ -188,6 +210,8 @@ Do not do yet:
 
 Goal: turn cursor and interaction metadata into a smooth camera plan.
 
+Status: implemented as a deterministic planning slice. ScreenFast can generate auto-zoom plans from metadata, and Auto Zoom mode automatically creates zoom and styled-export plans after recording finalization.
+
 Key workstreams:
 
 - Define zoom segments, focus points, easing, dwell time, and safe margins.
@@ -216,6 +240,8 @@ Do not do yet:
 ### Phase D: Styled Export Renderer
 
 Goal: produce a polished video from raw capture, metadata, and composition settings.
+
+Status: first slice implemented. ScreenFast can render a separate `.styled.mp4` from raw MP4 plus styled export plan through ffmpeg. It resolves configured, bundled, cached, or PATH ffmpeg first, then downloads and caches a Windows x64 ffmpeg build on first export when needed. The renderer currently applies segment-level zoom crops and background composition. Smooth camera interpolation, gradient backgrounds, rounded frame masks, and shadows remain planned.
 
 Key workstreams:
 
@@ -331,7 +357,7 @@ This strategy allows ScreenFast to become visually ambitious without making the 
 - No webcam compositing until explicitly planned after the core render pipeline is stable.
 - No full nonlinear timeline editor.
 - No cloud sync.
-- No broad multi-platform ambition before Windows-native capture and export quality are strong.
+- No broad multi-platform release claims before Windows-native capture and export quality are strong and each target OS has its own validated native port.
 - No unstable visual hacks that degrade recording reliability.
 - No large architecture rewrites without a concrete product or reliability payoff.
 - No hidden architecture drift without docs.

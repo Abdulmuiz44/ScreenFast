@@ -15,11 +15,12 @@ public sealed record AppSettings(
     string? DismissedRecoverySessionId,
     RecordingCountdownOption CountdownOption,
     bool OverlayEnabled,
+    bool AutoZoomEnabled,
     CaptureSourceModel? LastSelectedSource)
 {
     public static AppSettings CreateDefault() =>
         new(
-            2,
+            3,
             null,
             false,
             false,
@@ -32,6 +33,7 @@ public sealed record AppSettings(
             false,
             null,
             RecordingCountdownOption.Off,
+            true,
             true,
             null);
 }
