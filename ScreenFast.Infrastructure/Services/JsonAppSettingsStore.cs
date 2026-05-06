@@ -79,14 +79,16 @@ public sealed class JsonAppSettingsStore : IAppSettingsStore
             ? settings.CountdownOption
             : RecordingCountdownOption.Off;
         var overlayEnabled = settings.Version < 2 ? true : settings.OverlayEnabled;
+        var autoZoomEnabled = settings.Version < 3 ? true : settings.AutoZoomEnabled;
 
         return settings with
         {
-            Version = Math.Max(settings.Version, 2),
+            Version = Math.Max(settings.Version, 3),
             QualityPreset = qualityPreset,
             PostRecordingOpenBehavior = postRecordingBehavior,
             CountdownOption = countdownOption,
             OverlayEnabled = overlayEnabled,
+            AutoZoomEnabled = autoZoomEnabled,
             DismissedRecoverySessionId = string.IsNullOrWhiteSpace(settings.DismissedRecoverySessionId) ? null : settings.DismissedRecoverySessionId
         };
     }

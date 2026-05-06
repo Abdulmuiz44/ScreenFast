@@ -14,6 +14,7 @@ public sealed record RecorderStatusSnapshot(
     PostRecordingOpenBehavior PostRecordingOpenBehavior,
     RecordingCountdownOption CountdownOption,
     bool OverlayEnabled,
+    bool AutoZoomEnabled,
     int CountdownRemainingSeconds,
     string? PreflightWarningMessage)
 {
@@ -29,6 +30,7 @@ public sealed record RecorderStatusSnapshot(
             VideoQualityPreset.Standard,
             PostRecordingOpenBehavior.None,
             RecordingCountdownOption.Off,
+            true,
             true,
             0,
             null);

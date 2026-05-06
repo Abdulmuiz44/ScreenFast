@@ -17,6 +17,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
     private readonly IRecoveryService _recoveryService;
     private readonly IRecordingTelemetryCaptureService _telemetryCaptureService;
     private readonly IRecordingMetadataSidecarService _metadataSidecarService;
+    private readonly IAutoZoomPlanService _autoZoomPlanService;
+    private readonly IStyledExportPlanService _styledExportPlanService;
+    private readonly IStyledVideoExportService _styledVideoExportService;
     private readonly IScreenFastLogService _logService;
     private readonly RecorderStateMachine _stateMachine = new();
 
@@ -41,6 +44,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         IRecoveryService recoveryService,
         IRecordingTelemetryCaptureService telemetryCaptureService,
         IRecordingMetadataSidecarService metadataSidecarService,
+        IAutoZoomPlanService autoZoomPlanService,
+        IStyledExportPlanService styledExportPlanService,
+        IStyledVideoExportService styledVideoExportService,
         IScreenFastLogService logService)
     {
         _captureSourcePickerService = captureSourcePickerService;
@@ -53,6 +59,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         _recoveryService = recoveryService;
         _telemetryCaptureService = telemetryCaptureService;
         _metadataSidecarService = metadataSidecarService;
+        _autoZoomPlanService = autoZoomPlanService;
+        _styledExportPlanService = styledExportPlanService;
+        _styledVideoExportService = styledVideoExportService;
         _logService = logService;
         _recordingEncoderService.RuntimeErrorOccurred += OnRecordingRuntimeErrorOccurred;
         Snapshot = RecorderStatusSnapshot.CreateDefault();
@@ -82,6 +91,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             PostRecordingOpenBehavior = settings.PostRecordingOpenBehavior,
             CountdownOption = settings.CountdownOption,
             OverlayEnabled = settings.OverlayEnabled,
+            AutoZoomEnabled = settings.AutoZoomEnabled,
             StatusMessage = string.IsNullOrWhiteSpace(startupMessage)
                 ? nextState == RecorderState.Ready ? "Ready to record." : "Choose a display or window to get ready."
                 : startupMessage
@@ -111,6 +121,11 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             CountdownOption = countdownOption,
             OverlayEnabled = overlayEnabled
         });
+    }
+
+    public void UpdateAutoZoomPreference(bool autoZoomEnabled)
+    {
+        Publish(Snapshot with { AutoZoomEnabled = autoZoomEnabled });
     }
 
     public void PublishUserMessage(string message)
@@ -499,6 +514,7 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         var path = stopResult.Value;
         var fileName = Path.GetFileName(path);
         var metadataPath = await TrySaveRecordingMetadataAsync(path, duration, telemetryTimeline, cancellationToken);
+        var autoZoomArtifacts = await TryCreateAutoZoomArtifactsAsync(metadataPath, cancellationToken);
         await TryAddHistoryEntryAsync(CreateSuccessEntry(path, fileName, duration));
 
         var nextState = Snapshot.SelectedSource is not null && !string.IsNullOrWhiteSpace(Snapshot.OutputFolder)
@@ -511,7 +527,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             State = nextState,
             StatusMessage = string.IsNullOrWhiteSpace(metadataPath)
                 ? $"Saved MP4 to {path}. Metadata sidecar was not saved."
-                : $"Saved MP4 to {path}",
+                : string.IsNullOrWhiteSpace(autoZoomArtifacts)
+                    ? $"Saved MP4 to {path}"
+                    : $"Saved MP4 to {path}. {autoZoomArtifacts}",
             TimerText = "00:00:00"
         });
 
@@ -519,6 +537,118 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         _activeSession = null;
         _activeSessionId = null;
         await TryRunPostRecordingActionAsync(path);
+    }
+
+    private async Task<string?> TryCreateAutoZoomArtifactsAsync(string? metadataPath, CancellationToken cancellationToken)
+    {
+        if (!Snapshot.AutoZoomEnabled)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(metadataPath) || !File.Exists(metadataPath))
+        {
+            _logService.Warning(
+                "auto_zoom.skipped",
+                "ScreenFast skipped automatic zoom planning because metadata was unavailable.",
+                new Dictionary<string, object?> { ["metadataPath"] = metadataPath });
+            return null;
+        }
+
+        Publish(Snapshot with { StatusMessage = "Creating auto-zoom plan..." });
+
+        var zoomPlanResult = await _autoZoomPlanService.PlanFromSidecarAsync(
+            metadataPath,
+            AutoZoomPlannerOptions.Create(AutoZoomPlannerPreset.Aggressive),
+            cancellationToken);
+        if (!zoomPlanResult.IsSuccess || zoomPlanResult.Value is null)
+        {
+            _logService.Warning(
+                "auto_zoom.plan_failed",
+                "ScreenFast could not automatically create an auto-zoom plan.",
+                new Dictionary<string, object?>
+                {
+                    ["metadataPath"] = metadataPath,
+                    ["error"] = zoomPlanResult.Error?.Message
+                });
+            return "Auto Zoom plan was not created.";
+        }
+
+        var zoomPlanPathResult = await _autoZoomPlanService.SavePlanAsync(zoomPlanResult.Value, metadataPath, cancellationToken);
+        if (!zoomPlanPathResult.IsSuccess || string.IsNullOrWhiteSpace(zoomPlanPathResult.Value))
+        {
+            _logService.Warning(
+                "auto_zoom.plan_save_failed",
+                "ScreenFast could not save the automatic auto-zoom plan.",
+                new Dictionary<string, object?>
+                {
+                    ["metadataPath"] = metadataPath,
+                    ["error"] = zoomPlanPathResult.Error?.Message
+                });
+            return "Auto Zoom plan was not saved.";
+        }
+
+        var styledPlanResult = await _styledExportPlanService.PlanFromArtifactsAsync(metadataPath, zoomPlanPathResult.Value, cancellationToken: cancellationToken);
+        if (!styledPlanResult.IsSuccess || styledPlanResult.Value is null)
+        {
+            _logService.Warning(
+                "auto_zoom.styled_plan_failed",
+                "ScreenFast created an auto-zoom plan but could not create the styled export plan.",
+                new Dictionary<string, object?>
+                {
+                    ["metadataPath"] = metadataPath,
+                    ["zoomPlanPath"] = zoomPlanPathResult.Value,
+                    ["error"] = styledPlanResult.Error?.Message
+                });
+            return $"Auto Zoom plan ready: {Path.GetFileName(zoomPlanPathResult.Value)}.";
+        }
+
+        var styledPlanPathResult = await _styledExportPlanService.SavePlanAsync(styledPlanResult.Value, metadataPath, cancellationToken);
+        if (!styledPlanPathResult.IsSuccess || string.IsNullOrWhiteSpace(styledPlanPathResult.Value))
+        {
+            _logService.Warning(
+                "auto_zoom.styled_plan_save_failed",
+                "ScreenFast created an auto-zoom plan but could not save the styled export plan.",
+                new Dictionary<string, object?>
+                {
+                    ["metadataPath"] = metadataPath,
+                    ["zoomPlanPath"] = zoomPlanPathResult.Value,
+                    ["error"] = styledPlanPathResult.Error?.Message
+                });
+            return $"Auto Zoom plan ready: {Path.GetFileName(zoomPlanPathResult.Value)}.";
+        }
+
+        Publish(Snapshot with { StatusMessage = "Rendering styled auto-zoom MP4..." });
+        var exportResult = await _styledVideoExportService.ExportAsync(styledPlanPathResult.Value, cancellationToken);
+        if (!exportResult.IsSuccess || exportResult.Value is null)
+        {
+            _logService.Warning(
+                "auto_zoom.video_export_failed",
+                "ScreenFast created render plans but could not render the styled auto-zoom MP4.",
+                new Dictionary<string, object?>
+                {
+                    ["metadataPath"] = metadataPath,
+                    ["zoomPlanPath"] = zoomPlanPathResult.Value,
+                    ["styledPlanPath"] = styledPlanPathResult.Value,
+                    ["error"] = exportResult.Error?.Message
+                });
+            return $"Auto Zoom plans ready: {Path.GetFileName(zoomPlanPathResult.Value)}, {Path.GetFileName(styledPlanPathResult.Value)}. Video export needs ffmpeg.";
+        }
+
+        _logService.Info(
+            "auto_zoom.artifacts_created",
+            "ScreenFast automatically created render planning artifacts and a styled MP4 after recording.",
+            new Dictionary<string, object?>
+            {
+                ["metadataPath"] = metadataPath,
+                ["zoomPlanPath"] = zoomPlanPathResult.Value,
+                ["styledPlanPath"] = styledPlanPathResult.Value,
+                ["styledOutputVideoPath"] = exportResult.Value.OutputVideoPath,
+                ["segmentCount"] = zoomPlanResult.Value.Diagnostics.SegmentCount,
+                ["clickEventsInfluencedPlan"] = zoomPlanResult.Value.Diagnostics.ClickEventsInfluencedPlan
+            });
+
+        return $"Auto Zoom export ready: {Path.GetFileName(exportResult.Value.OutputVideoPath)}.";
     }
 
     private void TryStartTelemetry(RecordingSessionInfo sessionInfo, DateTimeOffset startedAtUtc)
@@ -1034,7 +1164,8 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             ["includeMicrophone"] = Snapshot.IncludeMicrophone,
             ["outputFolder"] = Snapshot.OutputFolder,
             ["countdownOption"] = Snapshot.CountdownOption,
-            ["overlayEnabled"] = Snapshot.OverlayEnabled
+            ["overlayEnabled"] = Snapshot.OverlayEnabled,
+            ["autoZoomEnabled"] = Snapshot.AutoZoomEnabled
         };
     }
 
