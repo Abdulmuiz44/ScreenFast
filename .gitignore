@@ -1,0 +1,23 @@
+# Build output
+bin/
+obj/
+**/bin/
+**/obj/
+artifacts/
+
+# Visual Studio and local workspace files
+.vs/
+*.user
+*.suo
+*.rsuser
+
+# Local SDK/cache folders
+.appdata/
+.dotnet_home/
+
+# Logs
+*.log
+
+# Local-only generated projects
+ScreenFast.Local.slnx
+ScreenFast.Local.vcxproj
