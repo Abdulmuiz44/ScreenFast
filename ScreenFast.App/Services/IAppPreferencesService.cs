@@ -22,6 +22,7 @@ public interface IAppPreferencesService
         PostRecordingOpenBehavior postRecordingOpenBehavior,
         RecordingCountdownOption countdownOption,
         bool overlayEnabled,
+        bool autoZoomEnabled,
         bool isOnboardingDismissed,
         CancellationToken cancellationToken = default);
 

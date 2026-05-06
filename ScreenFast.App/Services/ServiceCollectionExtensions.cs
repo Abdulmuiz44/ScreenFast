@@ -34,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAutoZoomPlanService, AutoZoomPlanService>();
         services.AddSingleton<IStyledExportPlanner, DeterministicStyledExportPlanner>();
         services.AddSingleton<IStyledExportPlanService, StyledExportPlanService>();
+        services.AddSingleton<IStyledVideoExportService, FfmpegStyledVideoExportService>();
         services.AddSingleton<IRecordingEncoderService, MediaFoundationRecordingEncoderService>();
         services.AddSingleton<ISystemAudioCaptureService, WasapiLoopbackCaptureService>();
         services.AddSingleton<IMicrophoneCaptureService, MicrophoneCaptureService>();

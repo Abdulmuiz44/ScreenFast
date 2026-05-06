@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:viewModels="using:ScreenFast.App.ViewModels"
     mc:Ignorable="d">
 
     <Grid Background="#F8FAFC">
@@ -85,9 +86,11 @@
                             <TextBlock Grid.Row="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="Countdown" />
                             <ComboBox Grid.Row="1" Grid.Column="1" DisplayMemberPath="Label" ItemsSource="{x:Bind ViewModel.CountdownOptions, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedCountdownOption, Mode=TwoWay}" />
                             <ToggleSwitch Grid.Row="1" Grid.Column="2" Header="Overlay" IsOn="{x:Bind ViewModel.OverlayEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Grid.Row="1" Grid.Column="3" Header="Auto Zoom" IsOn="{x:Bind ViewModel.AutoZoomEnabled, Mode=TwoWay}" />
 
                             <TextBlock Grid.Row="2" VerticalAlignment="Center" FontWeight="SemiBold" Text="After Stop" />
                             <ComboBox Grid.Row="2" Grid.Column="1" DisplayMemberPath="Label" ItemsSource="{x:Bind ViewModel.PostRecordingBehaviors, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedPostRecordingBehavior, Mode=TwoWay}" />
+                            <TextBlock Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="2" VerticalAlignment="Center" Foreground="#475569" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.AutoZoomModeText, Mode=OneWay}" />
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -112,6 +115,34 @@
                             <TextBlock Foreground="#475569" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.AudioChoicesSummary, Mode=OneWay}" />
                         </StackPanel>
                     </Grid>
+                </Border>
+
+                <Border Padding="18" Background="White" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="6">
+                    <StackPanel Spacing="10">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Recent Recordings" />
+                        <TextBlock Foreground="#475569" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.RecentRecordingsStatusText, Mode=OneWay}" />
+                        <ListView
+                            Height="220"
+                            ItemsSource="{x:Bind ViewModel.RecentRecordings, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.SelectedRecentRecording, Mode=TwoWay}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="viewModels:RecordingHistoryItemViewModel">
+                                    <StackPanel Padding="8" Spacing="3">
+                                        <TextBlock FontWeight="SemiBold" Text="{x:Bind FileName}" />
+                                        <TextBlock Foreground="#475569" TextWrapping="WrapWholeWords" Text="{x:Bind SourceSummary}" />
+                                        <TextBlock Foreground="#475569" Text="{x:Bind CreatedAtText}" />
+                                        <TextBlock Foreground="#B91C1C" TextWrapping="WrapWholeWords" Text="{x:Bind FailureText}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Command="{x:Bind ViewModel.OpenRecordingCommand}" Content="Open File" />
+                            <Button Command="{x:Bind ViewModel.OpenContainingFolderCommand}" Content="Open Folder" />
+                            <Button Command="{x:Bind ViewModel.ExportStyledVideoCommand}" Content="Export Auto Zoom MP4" />
+                            <Button Command="{x:Bind ViewModel.GenerateRenderPlansCommand}" Content="Create Plans" />
+                        </StackPanel>
+                    </StackPanel>
                 </Border>
 
                 <Border Padding="18" Background="White" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="6">
