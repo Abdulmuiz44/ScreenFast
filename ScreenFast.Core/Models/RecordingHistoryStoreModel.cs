@@ -4,5 +4,5 @@ public sealed record RecordingHistoryStoreModel(
     int Version,
     List<RecordingHistoryEntry> Entries)
 {
-    public static RecordingHistoryStoreModel CreateEmpty() => new(1, []);
+    public static RecordingHistoryStoreModel CreateEmpty() => new(2, []);
 }

@@ -51,6 +51,26 @@ public sealed class RecordingHistoryItemViewModel
 
     public string FailureText => Model.FailureSummary ?? string.Empty;
 
+    public string AssetGraphText
+    {
+        get
+        {
+            if (Model.AssetGraph is null)
+            {
+                return string.IsNullOrWhiteSpace(Model.ExportProfileName) ? string.Empty : $"Export profile: {Model.ExportProfileName}";
+            }
+
+            var assets = new List<string> { "Raw MP4" };
+            if (Model.AssetGraph.HasMetadataSidecar) assets.Add("metadata");
+            if (Model.AssetGraph.HasZoomPlan) assets.Add("zoom plan");
+            if (Model.AssetGraph.HasStyledExport) assets.Add("styled export");
+            var profile = string.IsNullOrWhiteSpace(Model.AssetGraph.Presets.ExportProfileName) ? Model.ExportProfileName : Model.AssetGraph.Presets.ExportProfileName;
+            return $"Assets: {string.Join(" + ", assets)} • Profile: {profile ?? "none"} • State: {Model.ProcessingState}";
+        }
+    }
+
+    public string WarningText => Model.Warnings.Count == 0 ? string.Empty : string.Join(" | ", Model.Warnings.Take(2));
+
     public string FileSizeText => Model.FileSizeBytes.HasValue
         ? FormatFileSize(Model.FileSizeBytes.Value)
         : "";

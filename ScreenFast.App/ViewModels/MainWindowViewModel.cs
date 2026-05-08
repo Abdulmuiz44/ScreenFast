@@ -20,12 +20,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IRecoveryService _recoveryService;
     private readonly IDiagnosticsExportService _diagnosticsExportService;
     private readonly IAppSmokeCheckService _smokeCheckService;
+    private readonly ISettingsBackupService _settingsBackupService;
+    private readonly IPresetLibraryService _presetLibraryService;
     private readonly DispatcherQueue? _dispatcherQueue;
     private readonly IReadOnlyList<VideoQualityPresetOption> _qualityPresets;
     private readonly IReadOnlyList<PostRecordingOpenBehaviorOption> _postRecordingBehaviors;
     private readonly IReadOnlyList<CountdownOptionViewModel> _countdownOptions;
     private readonly IReadOnlyList<HotkeyModifierOption> _hotkeyModifiers;
     private readonly IReadOnlyList<HotkeyKeyOption> _hotkeyKeys;
+    private IReadOnlyList<RecordingPresetOption> _recordingPresets = [];
+    private IReadOnlyList<ZoomPresetOption> _zoomPresets = [];
+    private IReadOnlyList<StylingPresetOption> _stylingPresets = [];
+    private IReadOnlyList<ExportPresetOption> _exportPresets = [];
+    private IReadOnlyList<ExportProfileOption> _exportProfiles = [];
 
     private RecorderStatusSnapshot _snapshot;
     private bool _includeSystemAudio;
@@ -44,6 +51,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private HotkeyKeyOption? _startHotkeyKey;
     private HotkeyKeyOption? _stopHotkeyKey;
     private HotkeyKeyOption? _pauseHotkeyKey;
+    private RecordingPresetOption? _selectedRecordingPreset;
+    private ZoomPresetOption? _selectedZoomPreset;
+    private StylingPresetOption? _selectedStylingPreset;
+    private ExportPresetOption? _selectedExportPreset;
+    private ExportProfileOption? _selectedExportProfile;
     private RecordingHistoryItemViewModel? _selectedRecentRecording;
     private bool _isOnboardingDismissed;
     private RecoveryNoticeModel? _recoveryNotice;
@@ -59,7 +71,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IAppPreferencesService preferencesService,
         IRecoveryService recoveryService,
         IDiagnosticsExportService diagnosticsExportService,
-        IAppSmokeCheckService smokeCheckService)
+        IAppSmokeCheckService smokeCheckService,
+        ISettingsBackupService settingsBackupService,
+        IPresetLibraryService presetLibraryService)
     {
         _orchestrator = orchestrator;
         _historyService = historyService;
@@ -69,6 +83,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _recoveryService = recoveryService;
         _diagnosticsExportService = diagnosticsExportService;
         _smokeCheckService = smokeCheckService;
+        _settingsBackupService = settingsBackupService;
+        _presetLibraryService = presetLibraryService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _snapshot = orchestrator.Snapshot;
         _qualityPresets = VideoQualityPresets.All.Select(definition => new VideoQualityPresetOption(definition.Preset, definition.DisplayName)).ToArray();
@@ -116,6 +132,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         CopyRecoveryPathCommand = new RelayCommand(CopyRecoveryPath, () => CanCopyRecoveryPath);
         ClearRecoveryStateCommand = new AsyncRelayCommand(ClearRecoveryStateAsync, () => IsRecoveryNoticeVisible);
         ExportDiagnosticsCommand = new AsyncRelayCommand(ExportDiagnosticsAsync, () => _windowHandle != nint.Zero);
+        ExportSettingsBackupCommand = new AsyncRelayCommand(ExportSettingsBackupAsync);
+        ImportLatestSettingsBackupCommand = new AsyncRelayCommand(ImportLatestSettingsBackupAsync);
 
         _orchestrator.SnapshotChanged += OnSnapshotChanged;
         _preferencesService.SettingsChanged += OnSettingsChanged;
@@ -141,6 +159,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand CopyRecoveryPathCommand { get; }
     public AsyncRelayCommand ClearRecoveryStateCommand { get; }
     public AsyncRelayCommand ExportDiagnosticsCommand { get; }
+    public AsyncRelayCommand ExportSettingsBackupCommand { get; }
+    public AsyncRelayCommand ImportLatestSettingsBackupCommand { get; }
 
     public ObservableCollection<RecordingHistoryItemViewModel> RecentRecordings { get; }
     public IReadOnlyList<VideoQualityPresetOption> QualityPresets => _qualityPresets;
@@ -148,6 +168,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IReadOnlyList<CountdownOptionViewModel> CountdownOptions => _countdownOptions;
     public IReadOnlyList<HotkeyModifierOption> HotkeyModifiers => _hotkeyModifiers;
     public IReadOnlyList<HotkeyKeyOption> HotkeyKeys => _hotkeyKeys;
+    public IReadOnlyList<RecordingPresetOption> RecordingPresets => _recordingPresets;
+    public IReadOnlyList<ZoomPresetOption> ZoomPresets => _zoomPresets;
+    public IReadOnlyList<StylingPresetOption> StylingPresets => _stylingPresets;
+    public IReadOnlyList<ExportPresetOption> ExportPresets => _exportPresets;
+    public IReadOnlyList<ExportProfileOption> ExportProfiles => _exportProfiles;
 
     public RecordingHistoryItemViewModel? SelectedRecentRecording
     {
@@ -372,6 +397,46 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public HotkeyKeyOption? StopHotkeyKey { get => _stopHotkeyKey; set => SetProperty(ref _stopHotkeyKey, value); }
     public HotkeyKeyOption? PauseHotkeyKey { get => _pauseHotkeyKey; set => SetProperty(ref _pauseHotkeyKey, value); }
 
+    public RecordingPresetOption? SelectedRecordingPreset
+    {
+        get => _selectedRecordingPreset;
+        set
+        {
+            if (SetProperty(ref _selectedRecordingPreset, value) && value is not null)
+            {
+                IncludeSystemAudio = value.Preset.IncludeSystemAudio;
+                IncludeMicrophone = value.Preset.IncludeMicrophone;
+                SelectedQualityPreset = FindQualityPreset(value.Preset.QualityPreset);
+                SelectedCountdownOption = FindCountdownOption(value.Preset.CountdownOption);
+                OverlayEnabled = value.Preset.OverlayEnabled;
+                SelectedExportPreset = _exportPresets.FirstOrDefault(x => x.Preset.Id == value.Preset.ExportPresetId) ?? _selectedExportPreset;
+                _ = SavePresetWorkflowAsync();
+            }
+        }
+    }
+
+    public ZoomPresetOption? SelectedZoomPreset { get => _selectedZoomPreset; set { if (SetProperty(ref _selectedZoomPreset, value) && value is not null) _ = SavePresetWorkflowAsync(); } }
+    public StylingPresetOption? SelectedStylingPreset { get => _selectedStylingPreset; set { if (SetProperty(ref _selectedStylingPreset, value) && value is not null) _ = SavePresetWorkflowAsync(); } }
+    public ExportPresetOption? SelectedExportPreset
+    {
+        get => _selectedExportPreset;
+        set
+        {
+            if (SetProperty(ref _selectedExportPreset, value) && value is not null)
+            {
+                SelectedZoomPreset = _zoomPresets.FirstOrDefault(x => x.Preset.Id == value.Preset.ZoomPresetId) ?? _selectedZoomPreset;
+                SelectedStylingPreset = _stylingPresets.FirstOrDefault(x => x.Preset.Id == value.Preset.StylingPresetId) ?? _selectedStylingPreset;
+                SelectedExportProfile = _exportProfiles.FirstOrDefault(x => x.Profile.Id == value.Preset.ExportProfileId) ?? _selectedExportProfile;
+                _ = SavePresetWorkflowAsync();
+            }
+        }
+    }
+    public ExportProfileOption? SelectedExportProfile { get => _selectedExportProfile; set { if (SetProperty(ref _selectedExportProfile, value) && value is not null) _ = SavePresetWorkflowAsync(); } }
+
+    public string PresetSummaryText => SelectedRecordingPreset is null || SelectedExportProfile is null
+        ? "Choose presets for recording, zoom planning, styling, and export."
+        : $"{SelectedRecordingPreset.Label} → {SelectedExportProfile.Label}";
+
     public bool CanSelectSource => !IsCountdownVisible && _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
     public bool CanPickOutputFolder => !IsCountdownVisible && _snapshot.State is RecorderState.Idle or RecorderState.Ready or RecorderState.Error;
     public bool CanRecord => !IsCountdownVisible && _snapshot.State == RecorderState.Ready && IsSourceReady && !string.IsNullOrWhiteSpace(_snapshot.OutputFolder);
@@ -385,6 +450,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _windowHandle = windowHandle;
         _orchestrator.SetWindowHandle(windowHandle);
         ExportDiagnosticsCommand.NotifyCanExecuteChanged();
+        ExportSettingsBackupCommand.NotifyCanExecuteChanged();
+        ImportLatestSettingsBackupCommand.NotifyCanExecuteChanged();
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -393,11 +460,13 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _orchestrator.UpdateAudioPreferences(_includeSystemAudio, _includeMicrophone, SelectedPostRecordingBehavior?.Behavior ?? PostRecordingOpenBehavior.None);
         _orchestrator.UpdateQualityPreset(SelectedQualityPreset?.Preset ?? VideoQualityPreset.Standard);
         _orchestrator.UpdatePolishPreferences(SelectedCountdownOption?.Option ?? RecordingCountdownOption.Off, _overlayEnabled);
+        _orchestrator.UpdatePresetSelection(_preferencesService.CurrentSettings.PresetSelection, _preferencesService.CurrentSettings.Presets, _preferencesService.CurrentSettings.ExportProfiles);
 
         await _historyService.RefreshAvailabilityAsync(cancellationToken);
         await ReloadHistoryAsync(cancellationToken);
         _smokeCheckReport = await _smokeCheckService.RunAsync(_windowHandle, cancellationToken);
         RaiseSmokeCheckProperties();
+        RaisePresetProperties();
         UpdateRecoveryNotice(_recoveryService.CurrentInterruptedSession);
     }
 
@@ -453,6 +522,58 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SetShellMessage("ScreenFast hotkeys updated.");
+    }
+
+    private async Task SavePresetWorkflowAsync()
+    {
+        if (SelectedRecordingPreset is null || SelectedZoomPreset is null || SelectedStylingPreset is null || SelectedExportPreset is null || SelectedExportProfile is null)
+        {
+            return;
+        }
+
+        var result = await _preferencesService.UpdatePresetWorkflowAsync(new ScreenFastPresetSelection(
+            SelectedRecordingPreset.Preset.Id,
+            SelectedZoomPreset.Preset.Id,
+            SelectedStylingPreset.Preset.Id,
+            SelectedExportPreset.Preset.Id,
+            SelectedExportProfile.Profile.Id));
+        if (!result.IsSuccess)
+        {
+            SetShellMessage(result.Error?.Message ?? "ScreenFast could not save preset workflow settings.");
+        }
+
+        RaisePropertyChanged(nameof(PresetSummaryText));
+    }
+
+    private async Task ExportSettingsBackupAsync()
+    {
+        var result = await _settingsBackupService.ExportAsync(_preferencesService.CurrentSettings);
+        PublishFriendlyStatus(result.IsSuccess ? $"Settings backup exported: {result.Value}" : result.Error?.Message ?? "ScreenFast could not export settings.");
+    }
+
+    private async Task ImportLatestSettingsBackupAsync()
+    {
+        var import = await _settingsBackupService.ImportLatestAsync();
+        if (!import.IsSuccess || import.Value is null)
+        {
+            PublishFriendlyStatus(import.Error?.Message ?? "ScreenFast could not import settings.");
+            return;
+        }
+
+        var restore = await _preferencesService.RestoreSettingsAsync(import.Value);
+        if (!restore.IsSuccess)
+        {
+            PublishFriendlyStatus(restore.Error?.Message ?? "ScreenFast could not restore settings.");
+            return;
+        }
+
+        _orchestrator.UpdateAudioPreferences(import.Value.IncludeSystemAudio, import.Value.IncludeMicrophone, import.Value.PostRecordingOpenBehavior);
+        _orchestrator.UpdateQualityPreset(import.Value.QualityPreset);
+        _orchestrator.UpdatePolishPreferences(import.Value.CountdownOption, import.Value.OverlayEnabled);
+        var hotkeys = await _desktopShellService.UpdateHotkeysAsync(import.Value.Hotkeys);
+        PublishFriendlyStatus(hotkeys.IsSuccess
+            ? "Settings backup imported and hotkeys re-registered."
+            : hotkeys.Error?.Message ?? "Settings imported, but hotkeys could not be re-registered.");
     }
 
     private async Task SaveWindowBehaviorAsync()
@@ -558,6 +679,21 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ApplySettings(AppSettings settings)
     {
+        var presets = _presetLibraryService.NormalizePresets(settings.Presets);
+        var profiles = _presetLibraryService.NormalizeExportProfiles(settings.ExportProfiles);
+        var selection = _presetLibraryService.NormalizeSelection(settings.PresetSelection, presets, profiles);
+        _recordingPresets = presets.RecordingPresets.Select(x => new RecordingPresetOption(x, x.DisplayName)).ToArray();
+        _zoomPresets = presets.ZoomPresets.Select(x => new ZoomPresetOption(x, x.DisplayName)).ToArray();
+        _stylingPresets = presets.StylingPresets.Select(x => new StylingPresetOption(x, x.DisplayName)).ToArray();
+        _exportPresets = presets.ExportPresets.Select(x => new ExportPresetOption(x, x.DisplayName)).ToArray();
+        _exportProfiles = profiles.Profiles.Select(x => new ExportProfileOption(x, x.DisplayName)).ToArray();
+        _selectedRecordingPreset = _recordingPresets.FirstOrDefault(x => x.Preset.Id == selection.RecordingPresetId);
+        _selectedZoomPreset = _zoomPresets.FirstOrDefault(x => x.Preset.Id == selection.ZoomPresetId);
+        _selectedStylingPreset = _stylingPresets.FirstOrDefault(x => x.Preset.Id == selection.StylingPresetId);
+        _selectedExportPreset = _exportPresets.FirstOrDefault(x => x.Preset.Id == selection.ExportPresetId);
+        _selectedExportProfile = _exportProfiles.FirstOrDefault(x => x.Profile.Id == selection.ExportProfileId);
+        _orchestrator.UpdatePresetSelection(selection, presets, profiles);
+
         _includeSystemAudio = settings.IncludeSystemAudio;
         _includeMicrophone = settings.IncludeMicrophone;
         _overlayEnabled = settings.OverlayEnabled;
@@ -590,6 +726,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         RaisePropertyChanged(nameof(StartHotkeyKey));
         RaisePropertyChanged(nameof(StopHotkeyKey));
         RaisePropertyChanged(nameof(PauseHotkeyKey));
+        RaisePresetProperties();
     }
 
     private void UpdateRecoveryNotice(RecoverySessionMarker? marker)
@@ -836,6 +973,21 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         RefreshCommands();
     }
 
+    private void RaisePresetProperties()
+    {
+        RaisePropertyChanged(nameof(RecordingPresets));
+        RaisePropertyChanged(nameof(ZoomPresets));
+        RaisePropertyChanged(nameof(StylingPresets));
+        RaisePropertyChanged(nameof(ExportPresets));
+        RaisePropertyChanged(nameof(ExportProfiles));
+        RaisePropertyChanged(nameof(SelectedRecordingPreset));
+        RaisePropertyChanged(nameof(SelectedZoomPreset));
+        RaisePropertyChanged(nameof(SelectedStylingPreset));
+        RaisePropertyChanged(nameof(SelectedExportPreset));
+        RaisePropertyChanged(nameof(SelectedExportProfile));
+        RaisePropertyChanged(nameof(PresetSummaryText));
+    }
+
     private void RaiseSmokeCheckProperties()
     {
         RaisePropertyChanged(nameof(HasSmokeCheckIssues));
@@ -867,6 +1019,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         RaisePropertyChanged(nameof(HasDiskSpaceWarning));
         RaisePropertyChanged(nameof(DiskSpaceWarningText));
         RaiseSmokeCheckProperties();
+        RaisePresetProperties();
         RaisePropertyChanged(nameof(CanSelectSource));
         RaisePropertyChanged(nameof(CanPickOutputFolder));
         RaisePropertyChanged(nameof(CanRecord));
@@ -915,12 +1068,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         CopyRecoveryPathCommand.NotifyCanExecuteChanged();
         ClearRecoveryStateCommand.NotifyCanExecuteChanged();
         ExportDiagnosticsCommand.NotifyCanExecuteChanged();
+        ExportSettingsBackupCommand.NotifyCanExecuteChanged();
+        ImportLatestSettingsBackupCommand.NotifyCanExecuteChanged();
     }
 }
 
 public sealed record VideoQualityPresetOption(VideoQualityPreset Preset, string Label);
 public sealed record PostRecordingOpenBehaviorOption(PostRecordingOpenBehavior Behavior, string Label);
 public sealed record CountdownOptionViewModel(RecordingCountdownOption Option, string Label);
+public sealed record RecordingPresetOption(RecordingPreset Preset, string Label);
+public sealed record ZoomPresetOption(ZoomPreset Preset, string Label);
+public sealed record StylingPresetOption(StylingPreset Preset, string Label);
+public sealed record ExportPresetOption(ExportPreset Preset, string Label);
+public sealed record ExportProfileOption(ExportProfile Profile, string Label);
 
 public sealed record HotkeyModifierOption(string Label, bool Control, bool Shift, bool Alt)
 {

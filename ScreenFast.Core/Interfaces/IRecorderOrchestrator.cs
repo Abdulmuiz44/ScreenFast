@@ -18,6 +18,8 @@ public interface IRecorderOrchestrator
 
     void UpdatePolishPreferences(RecordingCountdownOption countdownOption, bool overlayEnabled);
 
+    void UpdatePresetSelection(ScreenFastPresetSelection presetSelection, ScreenFastPresetLibrary presets, ExportProfileLibrary exportProfiles);
+
     void PublishUserMessage(string message);
 
     Task SelectSourceAsync(CancellationToken cancellationToken = default);

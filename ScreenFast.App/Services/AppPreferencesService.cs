@@ -10,6 +10,7 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
     private readonly IRecorderOrchestrator _recorderOrchestrator;
     private readonly ICaptureItemResolver _captureItemResolver;
     private readonly IScreenFastLogService _logService;
+    private readonly IPresetLibraryService _presetLibraryService;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     private bool _isInitialized;
@@ -19,12 +20,14 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
         IAppSettingsStore settingsStore,
         IRecorderOrchestrator recorderOrchestrator,
         ICaptureItemResolver captureItemResolver,
-        IScreenFastLogService logService)
+        IScreenFastLogService logService,
+        IPresetLibraryService presetLibraryService)
     {
         _settingsStore = settingsStore;
         _recorderOrchestrator = recorderOrchestrator;
         _captureItemResolver = captureItemResolver;
         _logService = logService;
+        _presetLibraryService = presetLibraryService;
         CurrentSettings = AppSettings.CreateDefault();
     }
 
@@ -55,6 +58,15 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
             messages.Add("The saved output folder was missing, so ScreenFast cleared it.");
             _logService.Warning("settings.output_folder_missing", "ScreenFast cleared the saved output folder because it no longer exists.");
         }
+
+        var presets = _presetLibraryService.NormalizePresets(settings.Presets);
+        var profiles = _presetLibraryService.NormalizeExportProfiles(settings.ExportProfiles);
+        settings = settings with
+        {
+            Presets = presets,
+            ExportProfiles = profiles,
+            PresetSelection = _presetLibraryService.NormalizeSelection(settings.PresetSelection, presets, profiles)
+        };
 
         CaptureSourceModel? restoredSource = null;
         if (settings.LastSelectedSource is not null)
@@ -168,6 +180,51 @@ public sealed class AppPreferencesService : IAppPreferencesService, IDisposable
                 ["overlayEnabled"] = overlayEnabled,
                 ["isOnboardingDismissed"] = isOnboardingDismissed
             });
+        return await PersistAsync(CurrentSettings, cancellationToken);
+    }
+
+    public async Task<OperationResult> UpdatePresetWorkflowAsync(ScreenFastPresetSelection selection, CancellationToken cancellationToken = default)
+    {
+        var presets = _presetLibraryService.NormalizePresets(CurrentSettings.Presets);
+        var profiles = _presetLibraryService.NormalizeExportProfiles(CurrentSettings.ExportProfiles);
+        var normalizedSelection = _presetLibraryService.NormalizeSelection(selection, presets, profiles);
+
+        CurrentSettings = CurrentSettings with
+        {
+            Presets = presets,
+            ExportProfiles = profiles,
+            PresetSelection = normalizedSelection
+        };
+
+        _recorderOrchestrator.UpdatePresetSelection(normalizedSelection, presets, profiles);
+        SettingsChanged?.Invoke(this, CurrentSettings);
+        _logService.Info("settings.preset_workflow_updated", "ScreenFast updated preset workflow settings.", new Dictionary<string, object?>
+        {
+            ["recordingPresetId"] = normalizedSelection.RecordingPresetId,
+            ["zoomPresetId"] = normalizedSelection.ZoomPresetId,
+            ["stylingPresetId"] = normalizedSelection.StylingPresetId,
+            ["exportPresetId"] = normalizedSelection.ExportPresetId,
+            ["exportProfileId"] = normalizedSelection.ExportProfileId
+        });
+        return await PersistAsync(CurrentSettings, cancellationToken);
+    }
+
+    public async Task<OperationResult> RestoreSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        var presets = _presetLibraryService.NormalizePresets(settings.Presets);
+        var profiles = _presetLibraryService.NormalizeExportProfiles(settings.ExportProfiles);
+        CurrentSettings = settings with
+        {
+            Version = Math.Max(settings.Version, 3),
+            Presets = presets,
+            ExportProfiles = profiles,
+            PresetSelection = _presetLibraryService.NormalizeSelection(settings.PresetSelection, presets, profiles),
+            LastSelectedSource = null
+        };
+
+        _recorderOrchestrator.UpdatePresetSelection(CurrentSettings.PresetSelection, presets, profiles);
+        SettingsChanged?.Invoke(this, CurrentSettings);
+        _logService.Info("settings.restored", "ScreenFast restored settings from a validated backup bundle.");
         return await PersistAsync(CurrentSettings, cancellationToken);
     }
 

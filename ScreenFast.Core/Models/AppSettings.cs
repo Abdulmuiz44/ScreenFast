@@ -15,7 +15,10 @@ public sealed record AppSettings(
     string? DismissedRecoverySessionId,
     RecordingCountdownOption CountdownOption,
     bool OverlayEnabled,
-    CaptureSourceModel? LastSelectedSource)
+    CaptureSourceModel? LastSelectedSource,
+    ScreenFastPresetSelection PresetSelection,
+    ScreenFastPresetLibrary Presets,
+    ExportProfileLibrary ExportProfiles)
 {
     public static AppSettings CreateDefault() =>
         new(
@@ -33,5 +36,8 @@ public sealed record AppSettings(
             null,
             RecordingCountdownOption.Off,
             true,
-            null);
+            null,
+            ScreenFastPresetSelection.CreateDefault(),
+            ScreenFastPresetLibrary.CreateDefault(),
+            ExportProfileLibrary.CreateDefault());
 }
