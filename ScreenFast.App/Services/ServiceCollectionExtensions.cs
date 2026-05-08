@@ -29,6 +29,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRecordingTelemetryCaptureService, WindowsCursorTelemetryCaptureService>();
         services.AddSingleton<IRecordingMetadataSidecarService, RecordingMetadataSidecarService>();
         services.AddSingleton<IRecordingMetadataReader, RecordingMetadataReader>();
+        services.AddSingleton<IPresetLibraryService, PresetLibraryService>();
+        services.AddSingleton<IHotkeyValidator, HotkeyValidator>();
+        services.AddSingleton<ISettingsBackupService, SettingsBackupService>();
+        services.AddSingleton<IStyledExportService, UnsupportedStyledExportService>();
+        services.AddSingleton<IPostRecordingFileActionService, PostRecordingFileActionService>();
+        services.AddSingleton<IPostRecordingProcessingPipeline, PostRecordingProcessingPipeline>();
         services.AddSingleton<IRecordingEncoderService, MediaFoundationRecordingEncoderService>();
         services.AddSingleton<ISystemAudioCaptureService, WasapiLoopbackCaptureService>();
         services.AddSingleton<IMicrophoneCaptureService, MicrophoneCaptureService>();

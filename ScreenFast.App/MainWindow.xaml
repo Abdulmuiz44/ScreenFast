@@ -21,6 +21,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <Border Padding="24"
@@ -314,7 +315,48 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="9" ColumnSpacing="16">
+            <Border Grid.Row="9"
+                    Padding="18"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Creator Presets and Export Profiles" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="WrapWholeWords"
+                                   Text="{x:Bind ViewModel.PresetSummaryText, Mode=OneWay}" />
+                    </StackPanel>
+                    <Grid ColumnSpacing="12" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock FontWeight="SemiBold" Text="Recording" />
+                        <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="Zoom" />
+                        <TextBlock Grid.Column="2" FontWeight="SemiBold" Text="Styling" />
+                        <TextBlock Grid.Column="3" FontWeight="SemiBold" Text="Export Preset" />
+                        <TextBlock Grid.Column="4" FontWeight="SemiBold" Text="Export Profile" />
+
+                        <ComboBox Grid.Row="1" DisplayMemberPath="Label" ItemsSource="{x:Bind ViewModel.RecordingPresets, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedRecordingPreset, Mode=TwoWay}" />
+                        <ComboBox Grid.Row="1" Grid.Column="1" DisplayMemberPath="Label" ItemsSource="{x:Bind ViewModel.ZoomPresets, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedZoomPreset, Mode=TwoWay}" />
+                        <ComboBox Grid.Row="1" Grid.Column="2" DisplayMemberPath="Label" ItemsSource="{x:Bind ViewModel.StylingPresets, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedStylingPreset, Mode=TwoWay}" />
+                        <ComboBox Grid.Row="1" Grid.Column="3" DisplayMemberPath="Label" ItemsSource="{x:Bind ViewModel.ExportPresets, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedExportPreset, Mode=TwoWay}" />
+                        <ComboBox Grid.Row="1" Grid.Column="4" DisplayMemberPath="Label" ItemsSource="{x:Bind ViewModel.ExportProfiles, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedExportProfile, Mode=TwoWay}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Grid Grid.Row="10" ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
@@ -341,6 +383,8 @@
                         <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind ViewModel.ShellMessageText, Mode=OneWay}" />
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.ExportDiagnosticsCommand}" Content="Export Diagnostics" />
+                            <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.ExportSettingsBackupCommand}" Content="Export Settings Backup" />
+                            <Button MinHeight="40" Padding="16,10" CornerRadius="12" Command="{x:Bind ViewModel.ImportLatestSettingsBackupCommand}" Content="Import Latest Backup" />
                             <TextBlock VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="Exports recent logs and safe app metadata into a zip file." />
                         </StackPanel>
                     </StackPanel>
@@ -411,7 +455,7 @@
                 </Border>
             </Grid>
 
-            <Border Grid.Row="10"
+            <Border Grid.Row="11"
                     Padding="18"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
@@ -452,6 +496,8 @@
                                             <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind FileSizeText}" />
                                             <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind AvailabilityText}" />
                                         </StackPanel>
+                                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" Text="{x:Bind AssetGraphText}" />
+                                        <TextBlock Foreground="Goldenrod" TextWrapping="WrapWholeWords" Text="{x:Bind WarningText}" />
                                         <TextBlock Foreground="IndianRed" Text="{x:Bind FailureText}" />
                                     </StackPanel>
                                 </Border>

@@ -13,4 +13,8 @@ public sealed record RecordingHistoryEntry(
     bool IsSuccess,
     string? FailureSummary,
     long? FileSizeBytes,
-    bool IsFileAvailable);
+    bool IsFileAvailable,
+    RecordingAssetGraph? AssetGraph,
+    string? ExportProfileName,
+    RecordingProcessingState ProcessingState,
+    IReadOnlyList<string> Warnings);

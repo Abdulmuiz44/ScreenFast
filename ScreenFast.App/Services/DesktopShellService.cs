@@ -20,6 +20,7 @@ public sealed class DesktopShellService : IDesktopShellService
     private readonly IRecorderOrchestrator _orchestrator;
     private readonly IAppPreferencesService _preferencesService;
     private readonly IScreenFastLogService _logService;
+    private readonly IHotkeyValidator _hotkeyValidator;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Forms.ContextMenuStrip _menu;
     private readonly Forms.ToolStripMenuItem _startMenuItem;
@@ -39,11 +40,12 @@ public sealed class DesktopShellService : IDesktopShellService
     private RecorderStatusSnapshot _snapshot;
     private HotkeySettings _activeHotkeys;
 
-    public DesktopShellService(IRecorderOrchestrator orchestrator, IAppPreferencesService preferencesService, IScreenFastLogService logService)
+    public DesktopShellService(IRecorderOrchestrator orchestrator, IAppPreferencesService preferencesService, IScreenFastLogService logService, IHotkeyValidator hotkeyValidator)
     {
         _orchestrator = orchestrator;
         _preferencesService = preferencesService;
         _logService = logService;
+        _hotkeyValidator = hotkeyValidator;
         _snapshot = orchestrator.Snapshot;
         _activeHotkeys = preferencesService.CurrentSettings.Hotkeys;
         _orchestrator.SnapshotChanged += OnSnapshotChanged;
@@ -113,11 +115,16 @@ public sealed class DesktopShellService : IDesktopShellService
 
     public async Task<OperationResult> UpdateHotkeysAsync(HotkeySettings hotkeys, CancellationToken cancellationToken = default)
     {
-        var validation = ValidateHotkeys(hotkeys);
-        if (!validation.IsSuccess)
+        var validation = _hotkeyValidator.Validate(hotkeys);
+        if (!validation.IsValid)
         {
-            _logService.Warning("hotkeys.validation_failed", validation.Error?.Message ?? "Hotkey validation failed.");
-            return validation;
+            _logService.Warning("hotkeys.validation_failed", validation.Summary);
+            return OperationResult.Failure(AppError.InvalidState(validation.Summary));
+        }
+
+        foreach (var warning in validation.Issues.Where(issue => issue.Severity == HotkeyValidationSeverity.Warning))
+        {
+            _logService.Warning("hotkeys.validation_warning", warning.Message, new Dictionary<string, object?> { ["gesture"] = warning.Gesture?.DisplayText });
         }
 
         if (_isInitialized)
@@ -350,33 +357,6 @@ public sealed class DesktopShellService : IDesktopShellService
         NativeMethods.UnregisterHotKey(_windowHandle, StartHotkeyId);
         NativeMethods.UnregisterHotKey(_windowHandle, StopHotkeyId);
         NativeMethods.UnregisterHotKey(_windowHandle, PauseResumeHotkeyId);
-    }
-
-    private static OperationResult ValidateHotkeys(HotkeySettings hotkeys)
-    {
-        var gestures = new[]
-        {
-            hotkeys.StartRecording,
-            hotkeys.StopRecording,
-            hotkeys.PauseResumeRecording
-        };
-
-        if (gestures.Any(gesture => !gesture.HasAnyModifier))
-        {
-            return OperationResult.Failure(AppError.InvalidState("Each hotkey must include at least one modifier key."));
-        }
-
-        if (gestures.Any(gesture => gesture.VirtualKey is < 0x70 or > 0x87))
-        {
-            return OperationResult.Failure(AppError.InvalidState("ScreenFast hotkeys currently support function keys F1 through F24."));
-        }
-
-        if (gestures.Distinct().Count() != gestures.Length)
-        {
-            return OperationResult.Failure(AppError.InvalidState("Each ScreenFast hotkey must be unique."));
-        }
-
-        return OperationResult.Success();
     }
 
     private static uint ToNativeModifiers(HotkeyGesture gesture)

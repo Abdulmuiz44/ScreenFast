@@ -11,12 +11,11 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
     private readonly IOutputFolderPickerService _outputFolderPickerService;
     private readonly IRecordingEncoderService _recordingEncoderService;
     private readonly IRecordingHistoryService _recordingHistoryService;
-    private readonly IFileLauncherService _fileLauncherService;
     private readonly IRecordingPreflightValidator _recordingPreflightValidator;
     private readonly IRecordingFileNameService _recordingFileNameService;
     private readonly IRecoveryService _recoveryService;
     private readonly IRecordingTelemetryCaptureService _telemetryCaptureService;
-    private readonly IRecordingMetadataSidecarService _metadataSidecarService;
+    private readonly IPostRecordingProcessingPipeline _postRecordingProcessingPipeline;
     private readonly IScreenFastLogService _logService;
     private readonly RecorderStateMachine _stateMachine = new();
 
@@ -29,30 +28,31 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
     private IRecordingTelemetrySession? _activeTelemetrySession;
     private List<string> _activeMetadataWarnings = [];
     private string? _activeSessionId;
+    private ScreenFastPresetSelection _presetSelection = ScreenFastPresetSelection.CreateDefault();
+    private ScreenFastPresetLibrary _presetLibrary = ScreenFastPresetLibrary.CreateDefault();
+    private ExportProfileLibrary _exportProfiles = ExportProfileLibrary.CreateDefault();
 
     public RecorderOrchestrator(
         ICaptureSourcePickerService captureSourcePickerService,
         IOutputFolderPickerService outputFolderPickerService,
         IRecordingEncoderService recordingEncoderService,
         IRecordingHistoryService recordingHistoryService,
-        IFileLauncherService fileLauncherService,
         IRecordingPreflightValidator recordingPreflightValidator,
         IRecordingFileNameService recordingFileNameService,
         IRecoveryService recoveryService,
         IRecordingTelemetryCaptureService telemetryCaptureService,
-        IRecordingMetadataSidecarService metadataSidecarService,
+        IPostRecordingProcessingPipeline postRecordingProcessingPipeline,
         IScreenFastLogService logService)
     {
         _captureSourcePickerService = captureSourcePickerService;
         _outputFolderPickerService = outputFolderPickerService;
         _recordingEncoderService = recordingEncoderService;
         _recordingHistoryService = recordingHistoryService;
-        _fileLauncherService = fileLauncherService;
         _recordingPreflightValidator = recordingPreflightValidator;
         _recordingFileNameService = recordingFileNameService;
         _recoveryService = recoveryService;
         _telemetryCaptureService = telemetryCaptureService;
-        _metadataSidecarService = metadataSidecarService;
+        _postRecordingProcessingPipeline = postRecordingProcessingPipeline;
         _logService = logService;
         _recordingEncoderService.RuntimeErrorOccurred += OnRecordingRuntimeErrorOccurred;
         Snapshot = RecorderStatusSnapshot.CreateDefault();
@@ -86,6 +86,9 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
                 ? nextState == RecorderState.Ready ? "Ready to record." : "Choose a display or window to get ready."
                 : startupMessage
         });
+        _presetSelection = settings.PresetSelection;
+        _presetLibrary = settings.Presets;
+        _exportProfiles = settings.ExportProfiles;
         _logService.Info("recorder.persisted_settings_applied", "ScreenFast applied persisted recorder settings.", BuildSnapshotProperties());
     }
 
@@ -111,6 +114,24 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             CountdownOption = countdownOption,
             OverlayEnabled = overlayEnabled
         });
+    }
+
+    public void UpdatePresetSelection(ScreenFastPresetSelection presetSelection, ScreenFastPresetLibrary presets, ExportProfileLibrary exportProfiles)
+    {
+        _presetSelection = presetSelection;
+        _presetLibrary = presets;
+        _exportProfiles = exportProfiles;
+        _logService.Info(
+            "recorder.presets_updated",
+            "ScreenFast updated active preset selection for post-record processing.",
+            new Dictionary<string, object?>
+            {
+                ["recordingPresetId"] = presetSelection.RecordingPresetId,
+                ["zoomPresetId"] = presetSelection.ZoomPresetId,
+                ["stylingPresetId"] = presetSelection.StylingPresetId,
+                ["exportPresetId"] = presetSelection.ExportPresetId,
+                ["exportProfileId"] = presetSelection.ExportProfileId
+            });
     }
 
     public void PublishUserMessage(string message)
@@ -498,8 +519,26 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
 
         var path = stopResult.Value;
         var fileName = Path.GetFileName(path);
-        var metadataPath = await TrySaveRecordingMetadataAsync(path, duration, telemetryTimeline, cancellationToken);
-        await TryAddHistoryEntryAsync(CreateSuccessEntry(path, fileName, duration));
+        var processingResult = await _postRecordingProcessingPipeline.ProcessSuccessfulRecordingAsync(
+            new PostRecordingProcessingRequest(
+                _activeSessionId ?? Guid.NewGuid().ToString("N"),
+                path,
+                fileName,
+                _recordingStartedAt,
+                duration,
+                Snapshot.SelectedSource,
+                _activeSession,
+                Snapshot.IncludeSystemAudio,
+                Snapshot.IncludeMicrophone,
+                Snapshot.QualityPreset,
+                Snapshot.CountdownOption,
+                Snapshot.PostRecordingOpenBehavior,
+                telemetryTimeline,
+                _activeMetadataWarnings.ToArray(),
+                _presetSelection,
+                _presetLibrary,
+                _exportProfiles),
+            cancellationToken);
 
         var nextState = Snapshot.SelectedSource is not null && !string.IsNullOrWhiteSpace(Snapshot.OutputFolder)
             ? RecorderState.Ready
@@ -509,16 +548,14 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         Publish(Snapshot with
         {
             State = nextState,
-            StatusMessage = string.IsNullOrWhiteSpace(metadataPath)
-                ? $"Saved MP4 to {path}. Metadata sidecar was not saved."
-                : $"Saved MP4 to {path}",
+            StatusMessage = processingResult.BuildStatusMessage(),
             TimerText = "00:00:00"
         });
 
-        _logService.Info("recording.stopped", "ScreenFast finalized the recording successfully.", BuildRecordingProperties(path, duration));
+        _logService.Info("recording.stopped", "ScreenFast finalized the recording successfully and ran post-record processing.", BuildRecordingProperties(path, duration));
         _activeSession = null;
         _activeSessionId = null;
-        await TryRunPostRecordingActionAsync(path);
+        _activeMetadataWarnings.Clear();
     }
 
     private void TryStartTelemetry(RecordingSessionInfo sessionInfo, DateTimeOffset startedAtUtc)
@@ -611,116 +648,6 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
         }
     }
 
-    private async Task<string?> TrySaveRecordingMetadataAsync(
-        string finalizedVideoPath,
-        TimeSpan duration,
-        RecordingTelemetryTimeline telemetryTimeline,
-        CancellationToken cancellationToken)
-    {
-        if (_activeSession is null || _activeSessionId is null || Snapshot.SelectedSource is null)
-        {
-            _logService.Warning(
-                "metadata.sidecar_skipped",
-                "ScreenFast skipped metadata sidecar creation because recording context was incomplete.",
-                new Dictionary<string, object?> { ["videoPath"] = finalizedVideoPath });
-            return null;
-        }
-
-        try
-        {
-            var metadata = BuildRecordingMetadata(finalizedVideoPath, duration, telemetryTimeline);
-            var saveResult = await _metadataSidecarService.SaveAsync(metadata, cancellationToken);
-            if (saveResult.IsSuccess && !string.IsNullOrWhiteSpace(saveResult.Value))
-            {
-                return saveResult.Value;
-            }
-
-            _logService.Warning(
-                "metadata.sidecar_unavailable",
-                "ScreenFast finalized the MP4, but metadata sidecar persistence failed.",
-                new Dictionary<string, object?>
-                {
-                    ["videoPath"] = finalizedVideoPath,
-                    ["error"] = saveResult.Error?.Message
-                });
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logService.Warning(
-                "metadata.sidecar_exception",
-                "ScreenFast finalized the MP4, but metadata sidecar creation failed.",
-                new Dictionary<string, object?>
-                {
-                    ["videoPath"] = finalizedVideoPath,
-                    ["error"] = ex.Message
-                });
-            return null;
-        }
-    }
-
-    private RecordingSidecarMetadata BuildRecordingMetadata(
-        string finalizedVideoPath,
-        TimeSpan duration,
-        RecordingTelemetryTimeline telemetryTimeline)
-    {
-        var source = Snapshot.SelectedSource!;
-        var sourceMetadata = new RecordingSourceMetadata(
-            source.SourceId,
-            source.Type,
-            source.DisplayName,
-            BuildSourceSummary(),
-            _activeSession?.Width ?? source.Width,
-            _activeSession?.Height ?? source.Height,
-            telemetryTimeline.SourceBounds);
-
-        var warnings = _activeMetadataWarnings
-            .Concat(telemetryTimeline.Warnings)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        return new RecordingSidecarMetadata(
-            1,
-            Guid.NewGuid().ToString("N"),
-            _activeSessionId!,
-            DateTimeOffset.UtcNow,
-            _recordingStartedAt,
-            finalizedVideoPath,
-            Path.GetFileName(finalizedVideoPath),
-            sourceMetadata,
-            Math.Max(0, (long)Math.Round(duration.TotalMilliseconds)),
-            Snapshot.QualityPreset,
-            VideoQualityPresets.Get(Snapshot.QualityPreset).DisplayName,
-            Snapshot.IncludeSystemAudio,
-            Snapshot.IncludeMicrophone,
-            Snapshot.CountdownOption,
-            telemetryTimeline,
-            ["Raw recording remains the source of truth. This sidecar is render-planning input for future zoom and styled export work."],
-            warnings);
-    }
-
-    private RecordingTelemetryTimeline CreateFallbackTelemetryTimeline(TimeSpan duration, string? warning = null)
-    {
-        var warnings = _activeMetadataWarnings.ToList();
-        if (!string.IsNullOrWhiteSpace(warning))
-        {
-            warnings.Add(warning);
-        }
-
-        if (warnings.Count == 0)
-        {
-            warnings.Add("Cursor telemetry was unavailable for this recording.");
-        }
-
-        return new RecordingTelemetryTimeline(
-            20,
-            _recordingStartedAt == default ? DateTimeOffset.UtcNow - duration : _recordingStartedAt,
-            DateTimeOffset.UtcNow,
-            null,
-            [],
-            [],
-            warnings.Distinct(StringComparer.Ordinal).ToArray());
-    }
     private async Task<bool> RunCountdownAsync(int countdownSeconds, CancellationToken cancellationToken)
     {
         CancelCountdown();
@@ -772,67 +699,6 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
 
     private bool IsCountdownActive => _countdownCancellationSource is not null && Snapshot.CountdownRemainingSeconds > 0;
 
-    private async Task TryRunPostRecordingActionAsync(string filePath)
-    {
-        OperationResult result;
-        if (Snapshot.PostRecordingOpenBehavior == PostRecordingOpenBehavior.OpenFile)
-        {
-            result = await _fileLauncherService.OpenFileAsync(filePath);
-        }
-        else if (Snapshot.PostRecordingOpenBehavior == PostRecordingOpenBehavior.OpenContainingFolder)
-        {
-            result = await _fileLauncherService.OpenContainingFolderAsync(filePath);
-        }
-        else
-        {
-            return;
-        }
-
-        if (!result.IsSuccess)
-        {
-            Publish(Snapshot with { StatusMessage = result.Error?.Message ?? "ScreenFast could not run the post-recording action." });
-            _logService.Warning("recording.post_action_failed", result.Error?.Message ?? "Post-recording action failed.", new Dictionary<string, object?> { ["path"] = filePath });
-        }
-        else
-        {
-            _logService.Info("recording.post_action_completed", "ScreenFast ran the post-recording action.", new Dictionary<string, object?> { ["path"] = filePath, ["behavior"] = Snapshot.PostRecordingOpenBehavior });
-        }
-    }
-
-    private RecordingHistoryEntry CreateSuccessEntry(string filePath, string fileName, TimeSpan duration)
-    {
-        long? size = null;
-        var exists = false;
-
-        try
-        {
-            var info = new FileInfo(filePath);
-            if (info.Exists)
-            {
-                exists = true;
-                size = info.Length;
-            }
-        }
-        catch
-        {
-        }
-
-        return new RecordingHistoryEntry(
-            Guid.NewGuid(),
-            filePath,
-            fileName,
-            DateTimeOffset.UtcNow,
-            duration,
-            BuildSourceSummary(),
-            Snapshot.IncludeSystemAudio,
-            Snapshot.IncludeMicrophone,
-            VideoQualityPresets.Get(Snapshot.QualityPreset).DisplayName,
-            true,
-            null,
-            size,
-            exists);
-    }
-
     private RecordingHistoryEntry CreateFailedEntry(TimeSpan duration, string? failureSummary)
     {
         var maybePath = _activeSession?.FilePath ?? string.Empty;
@@ -869,7 +735,11 @@ public sealed class RecorderOrchestrator : IRecorderOrchestrator, IDisposable
             false,
             string.IsNullOrWhiteSpace(failureSummary) ? "Recording failed." : failureSummary,
             size,
-            exists);
+            exists,
+            null,
+            null,
+            RecordingProcessingState.Failure,
+            [string.IsNullOrWhiteSpace(failureSummary) ? "Recording failed before post-record processing." : failureSummary]);
     }
 
     private string BuildSourceSummary()

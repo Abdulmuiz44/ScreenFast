@@ -56,7 +56,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
                 entries = entries.Take(MaxEntries).ToList();
             }
 
-            await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, entries), cancellationToken);
+            await SaveUnsafeAsync(new RecordingHistoryStoreModel(2, entries), cancellationToken);
             _logService.Info(
                 "history.entry_added",
                 "ScreenFast added a recording history entry.",
@@ -80,7 +80,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
         {
             var store = await LoadUnsafeAsync(cancellationToken);
             var entries = store.Entries.Where(x => x.Id != entryId).ToList();
-            await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, entries), cancellationToken);
+            await SaveUnsafeAsync(new RecordingHistoryStoreModel(2, entries), cancellationToken);
             _logService.Info("history.entry_removed", "ScreenFast removed a recording history entry.", new Dictionary<string, object?> { ["entryId"] = entryId });
         }
         finally
@@ -110,7 +110,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
         {
             var store = await LoadUnsafeAsync(cancellationToken);
             var filtered = store.Entries.Where(x => x.IsFileAvailable || !x.IsSuccess).ToList();
-            await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, filtered), cancellationToken);
+            await SaveUnsafeAsync(new RecordingHistoryStoreModel(2, filtered), cancellationToken);
             _logService.Info("history.missing_cleared", "ScreenFast removed missing-file history entries.");
         }
         finally
@@ -131,7 +131,7 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
                     IsFileAvailable = entry.IsSuccess && !string.IsNullOrWhiteSpace(entry.FilePath) && File.Exists(entry.FilePath)
                 })
                 .ToList();
-            await SaveUnsafeAsync(new RecordingHistoryStoreModel(1, updated), cancellationToken);
+            await SaveUnsafeAsync(new RecordingHistoryStoreModel(2, updated), cancellationToken);
             _logService.Info("history.availability_refreshed", "ScreenFast refreshed recording history availability.");
         }
         finally
@@ -151,13 +151,42 @@ public sealed class RecordingHistoryService : IRecordingHistoryService
         {
             await using var stream = File.OpenRead(_historyPath);
             var model = await JsonSerializer.DeserializeAsync<RecordingHistoryStoreModel>(stream, JsonOptions, cancellationToken);
-            return model ?? RecordingHistoryStoreModel.CreateEmpty();
+            return Normalize(model);
         }
         catch (Exception ex)
         {
             _logService.Warning("history.load_failed", "ScreenFast could not read recording history and fell back to an empty list.", new Dictionary<string, object?> { ["error"] = ex.Message });
             return RecordingHistoryStoreModel.CreateEmpty();
         }
+    }
+
+    private static RecordingHistoryStoreModel Normalize(RecordingHistoryStoreModel? store)
+    {
+        if (store is null)
+        {
+            return RecordingHistoryStoreModel.CreateEmpty();
+        }
+
+        var entries = store.Entries
+            .Select(entry => entry with
+            {
+                ProcessingState = entry.IsSuccess ? entry.ProcessingState : RecordingProcessingState.Failure,
+                Warnings = entry.Warnings ?? [],
+                ExportProfileName = entry.ExportProfileName ?? entry.AssetGraph?.Presets.ExportProfileName,
+                AssetGraph = entry.AssetGraph ?? (entry.IsSuccess && !string.IsNullOrWhiteSpace(entry.FilePath)
+                    ? new RecordingAssetGraph(
+                        entry.FilePath,
+                        null,
+                        null,
+                        null,
+                        new RecordingPresetSnapshot(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty),
+                        RecordingProcessingState.Success,
+                        [])
+                    : null)
+            })
+            .ToList();
+
+        return new RecordingHistoryStoreModel(Math.Max(store.Version, 2), entries);
     }
 
     private async Task SaveUnsafeAsync(RecordingHistoryStoreModel store, CancellationToken cancellationToken)

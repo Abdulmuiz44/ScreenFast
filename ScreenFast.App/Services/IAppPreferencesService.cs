@@ -25,5 +25,9 @@ public interface IAppPreferencesService
         bool isOnboardingDismissed,
         CancellationToken cancellationToken = default);
 
+    Task<OperationResult> UpdatePresetWorkflowAsync(ScreenFastPresetSelection selection, CancellationToken cancellationToken = default);
+
+    Task<OperationResult> RestoreSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default);
+
     Task<OperationResult> UpdateDismissedRecoverySessionAsync(string? sessionId, CancellationToken cancellationToken = default);
 }

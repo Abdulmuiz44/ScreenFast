@@ -50,7 +50,7 @@ Implemented or largely present:
 - Tray behavior.
 - Onboarding.
 - Preflight validation.
-- Recording history.
+- Recording history with raw MP4 continuity and an asset graph for secondary artifacts.
 - Diagnostics export.
 - Structured logging.
 - Interrupted-session recovery.
@@ -73,7 +73,17 @@ Not yet implemented in the real product direction:
 - Rounded recorded-content frame, shadows, padding, spacing, and safe-margin layout.
 - Export renderer for polished outputs.
 - Creator-style scene composition presets.
-- Robust styled export workflow on top of raw capture.
+- Full styled video rendering on top of raw capture.
+
+Recently implemented workflow scaffolding:
+
+- Persisted recording, zoom, styling, and export presets.
+- Persisted export profile models for raw-only, styled-only, and both-output workflows.
+- Explicit post-record processing pipeline after MP4 finalization.
+- Metadata sidecar handoff and deterministic zoom-plan artifact generation.
+- Styled export stage wiring with an honest unsupported-renderer result until the renderer lands.
+- Versioned local settings backup/export/import for hotkeys, presets, export profiles, and UI behavior preferences.
+- Centralized hotkey validation and safer runtime registration fallback.
 
 The honest state: ScreenFast is currently a recorder with meaningful reliability work. The true north star is a recorder plus render/presentation engine.
 
@@ -349,10 +359,6 @@ A successful v1.5/v2 ScreenFast feels like this:
 
 ## Immediate Next Build Slice
 
-The next smart implementation slice is not random feature sprawl. It is:
+The next smart implementation slice is to replace the current unsupported styled-export stage with a safe native second-pass renderer that consumes the existing raw MP4, metadata sidecar, zoom plan, presets, and export profiles. That renderer should start with deterministic composition basics: background, canvas sizing, padding, rounded frame, and shadow.
 
-1. Cursor telemetry capture.
-2. Metadata persistence beside recordings.
-3. Render pipeline planning for future camera path and styled export work.
-
-That slice creates the bridge from reliable recorder to polished presentation engine while protecting the existing capture foundation.
+Do not replace the raw recorder. The MP4 remains the source of truth, and render failures must continue to report partial success without corrupting capture output.
